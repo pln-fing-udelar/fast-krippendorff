@@ -8,7 +8,7 @@ Based on [Thomas Grill implementation](https://github.com/grrrr/krippendorff-alp
 
 Given a `value_count` matrix, which has the value count for each unit:
 
-```
+```python
 import krippendorff
 
 krippendorff.alpha(value_count)
