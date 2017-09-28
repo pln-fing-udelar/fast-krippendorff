@@ -1,0 +1,179 @@
+"""
+This module provides a function to compute the Krippendorff's alpha statistical measure of the agreement achieved
+when coding a set of units based on the values of a variable.
+
+For more information, see: https://en.wikipedia.org/wiki/Krippendorff%27s_alpha
+
+The module naming follows the one from the Wikipedia link.
+"""
+
+import numpy as np
+
+
+def _nominal_metric(v1, v2, **_kwargs):
+    """Metric for nominal data."""
+    return v1 != v2
+
+
+def _ordinal_metric(_v1, _v2, i1, i2, n_v):
+    """Metric for ordinal data."""
+    """"""
+    return np.sum(n_v[i1:(i2 + 1)]) - (n_v[i1] + n_v[i2]) / 2
+
+
+def _interval_metric(v1, v2, **_kwargs):
+    """Metric for interval data."""
+    """"""
+    return (v1 - v2) ** 2
+
+
+def _ratio_metric(v1, v2, **_kwargs):
+    """Metric for ratio data."""
+    """"""
+    return ((v1 - v2) / (v1 + v2)) ** 2
+
+
+def _coincidences(value_counts, value_domain, dtype=np.float64):
+    """Coincidence matrix.
+
+    Parameters
+    ----------
+    value_counts : ndarray, with shape (N, V)
+        Number of coders that assigned a certain value to a determined unit, where N is the number of units
+        and V is the value count.
+
+    value_domain : array-like, with shape (V,)
+        Possible values V the units can take.
+        If the level of measurement is not nominal, it must be ordered.
+
+    dtype : data-type
+        Result and computation data-type.
+
+    Returns
+    -------
+    o : ndarray, with shape (V, V)
+        Coincidence matrix.
+    """
+    value_counts_matrices = value_counts.reshape(value_counts.shape + (1,))
+    pairable = np.maximum(np.sum(value_counts, axis=1), 2)
+    diagonals = np.tile(np.eye(len(value_domain)), (len(value_counts), 1, 1)) \
+        * value_counts.reshape((value_counts.shape[0], 1, value_counts.shape[1]))
+    denormalized_coincidences = value_counts_matrices * value_counts_matrices.transpose((0, 2, 1)) - diagonals
+    return np.sum(np.divide(denormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype), axis=0)
+
+
+def _random_coincidences(value_domain, n, n_v):
+    """Random coincidence matrix.
+
+    Parameters
+    ----------
+    value_domain : array-like, with shape (V,)
+        Possible values V the units can take.
+        If the level of measurement is not nominal, it must be ordered.
+
+    n : scalar
+        Number of pairable values.
+
+    n_v : ndarray, with shape (V,)
+        Number of pairable elements for each value.
+
+    Returns
+    -------
+    e : ndarray, with shape (V, V)
+        Random coincidence matrix.
+    """
+    n_v_column = n_v.reshape(-1, 1)
+    return (n_v_column.dot(n_v_column.T) - np.eye(len(value_domain)) * n_v_column) / (n - 1)
+
+
+def _distances(value_domain, distance_metric, n_v):
+    """Distances of the different possible values.
+
+    Parameters
+    ----------
+    value_domain : array-like, with shape (V,)
+        Possible values V the units can take.
+        If the level of measurement is not nominal, it must be ordered.
+
+    distance_metric : callable
+        Callable that return the distance of two given values.
+
+    n_v : ndarray, with shape (V,)
+        Number of pairable elements for each value.
+
+    Returns
+    -------
+    d : ndarray, with shape (V, V)
+        Distance matrix for each value pair.
+
+    """
+    return np.array([[distance_metric(v1, v2, i1=i1, i2=i2, n_v=n_v)
+                      for i2, v2 in enumerate(value_domain)]
+                     for i1, v1 in enumerate(value_domain)])
+
+
+def _distance_metric(level_of_measurement):
+    """Distance metric callable of the level of measurement.
+
+    Parameters
+    ----------
+    level_of_measurement : string or callable
+        Steven's level of measurement of the variable.
+        It must be one of 'nominal', 'ordinal', 'interval', 'ratio' or a callable.
+
+    Returns
+    -------
+    metric : callable
+        Distance callable.
+    """
+    return {
+        'nominal': _nominal_metric,
+        'ordinal': _ordinal_metric,
+        'interval': _interval_metric,
+        'ratio': _ratio_metric,
+    }.get(level_of_measurement, level_of_measurement)
+
+
+def alpha(value_counts, value_domain=None, level_of_measurement='interval', dtype=np.float64):
+    """Compute Krippendorff's alpha.
+
+    See https://en.wikipedia.org/wiki/Krippendorff%27s_alpha for more information.
+
+    Parameters
+    ----------
+    value_counts : ndarray, with shape (N, V)
+        Number of coders that assigned a certain value to a determined unit, where N is the number of units
+        and V is the value count.
+
+    value_domain : array-like, with shape (V,)
+        Possible values the units can take.
+        If the level of measurement is not nominal, it must be ordered.
+        By default it's `list(range(V))`.
+
+    level_of_measurement : string or callable
+        Steven's level of measurement of the variable.
+        It must be one of 'nominal', 'ordinal', 'interval', 'ratio' or a callable.
+
+    dtype : data-type
+        Result and computation data-type.
+
+    Returns
+    -------
+    alpha : `dtype`
+        Scalar value of Krippendorff's alpha of type `dtype`.
+
+    """
+    if value_domain:
+        assert value_counts.shape[1] == len(value_domain), \
+            "The value domain should be equal to the number of columns of value_counts."
+    else:
+        value_domain = tuple(range(value_counts.shape[1]))
+
+    distance_metric = _distance_metric(level_of_measurement)
+
+    o = _coincidences(value_counts, value_domain, dtype=dtype)
+    n_v = np.sum(o, axis=0)
+    n = np.sum(n_v)
+    e = _random_coincidences(value_domain, n, n_v)
+    d = _distances(value_domain, distance_metric, n_v)
+    return 1 - np.sum(o * d) / np.sum(e * d)
