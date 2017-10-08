@@ -6,12 +6,12 @@ Based on [Thomas Grill implementation](https://github.com/grrrr/krippendorff-alp
 
 ## Example usage
 
-Given a `value_count` matrix, which has the value count for each unit:
+Given a reliability data matrix, run:
 
 ```python
 import krippendorff
 
-krippendorff.alpha(value_count)
+krippendorff.alpha(reliability_data)
 ```
 
 See `sample.py` and `alpha` docstring for more.

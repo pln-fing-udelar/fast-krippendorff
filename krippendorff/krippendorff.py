@@ -39,7 +39,7 @@ def _coincidences(value_counts, value_domain, dtype=np.float64):
         Number of coders that assigned a certain value to a determined unit, where N is the number of units
         and V is the value count.
 
-    value_domain : array-like, with shape (V,)
+    value_domain : array_like, with shape (V,)
         Possible values V the units can take.
         If the level of measurement is not nominal, it must be ordered.
 
@@ -64,7 +64,7 @@ def _random_coincidences(value_domain, n, n_v):
 
     Parameters
     ----------
-    value_domain : array-like, with shape (V,)
+    value_domain : array_like, with shape (V,)
         Possible values V the units can take.
         If the level of measurement is not nominal, it must be ordered.
 
@@ -88,7 +88,7 @@ def _distances(value_domain, distance_metric, n_v):
 
     Parameters
     ----------
-    value_domain : array-like, with shape (V,)
+    value_domain : array_like, with shape (V,)
         Possible values V the units can take.
         If the level of measurement is not nominal, it must be ordered.
 
@@ -102,7 +102,6 @@ def _distances(value_domain, distance_metric, n_v):
     -------
     d : ndarray, with shape (V, V)
         Distance matrix for each value pair.
-
     """
     return np.array([[distance_metric(v1, v2, i1=i1, i2=i2, n_v=n_v)
                       for i2, v2 in enumerate(value_domain)]
@@ -131,21 +130,57 @@ def _distance_metric(level_of_measurement):
     }.get(level_of_measurement, level_of_measurement)
 
 
-def alpha(value_counts, value_domain=None, level_of_measurement='interval', dtype=np.float64):
+def _transpose_list(list_of_lists):
+    """Transpose a list of lists."""
+    return list(map(list, zip(*list_of_lists)))
+
+
+def _reliability_data_to_value_counts(reliability_data, value_domain):
+    """Return the value counts given the reliability data.
+
+    Parameters
+    ----------
+    reliability_data : ndarray, with shape (M, N)
+        Reliability data matrix which has the rate the i coder gave to the j unit, where M is the number of raters
+        and N is the unit count.
+        Missing rates are represented with `np.nan`.
+
+    value_domain : array_like, with shape (V,)
+        Possible values the units can take.
+
+    Returns
+    -------
+    value_counts : ndarray, with shape (N, V)
+        Number of coders that assigned a certain value to a determined unit, where N is the number of units
+        and V is the value count.
+    """
+    return np.array([[sum(1 for rate in unit if rate == v) for v in value_domain] for unit in reliability_data.T])
+
+
+def alpha(reliability_data=None, value_counts=None, value_domain=None, level_of_measurement='interval',
+          dtype=np.float64):
     """Compute Krippendorff's alpha.
 
     See https://en.wikipedia.org/wiki/Krippendorff%27s_alpha for more information.
 
     Parameters
     ----------
+    reliability_data : array_like, with shape (M, N)
+        Reliability data matrix which has the rate the i coder gave to the j unit, where M is the number of raters
+        and N is the unit count.
+        Missing rates are represented with `np.nan`.
+        If it's provided then `value_counts` must not be provided.
+
     value_counts : ndarray, with shape (N, V)
         Number of coders that assigned a certain value to a determined unit, where N is the number of units
         and V is the value count.
+        If it's provided then `reliability_data` must not be provided.
 
-    value_domain : array-like, with shape (V,)
+    value_domain : array_like, with shape (V,)
         Possible values the units can take.
         If the level of measurement is not nominal, it must be ordered.
-        By default it's `list(range(V))`.
+        If `reliability_data` is provided, then the default value is the ordered list of unique rates that appear.
+        Else, the default value is `list(range(V))`.
 
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
@@ -159,12 +194,49 @@ def alpha(value_counts, value_domain=None, level_of_measurement='interval', dtyp
     alpha : `dtype`
         Scalar value of Krippendorff's alpha of type `dtype`.
 
+    Examples
+    --------
+    >>> reliability_data = [[np.nan, np.nan, np.nan, np.nan, np.nan, 3, 4, 1, 2, 1, 1, 3, 3, np.nan, 3],
+    ...                     [1, np.nan, 2, 1, 3, 3, 4, 3, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+    ...                     [np.nan, np.nan, 2, 1, 3, 4, 4, np.nan, 2, 1, 1, 3, 3, np.nan, 4]]
+    >>> alpha(reliability_data=reliability_data, level_of_measurement='nominal')
+    0.69135802469135799
+    >>> alpha(reliability_data=reliability_data, level_of_measurement='interval')
+    0.81084489281210592
+    >>> value_counts = np.array([[1, 0, 0, 0],
+    ...                          [0, 0, 0, 0],
+    ...                          [0, 2, 0, 0],
+    ...                          [2, 0, 0, 0],
+    ...                          [0, 0, 2, 0],
+    ...                          [0, 0, 2, 1],
+    ...                          [0, 0, 0, 3],
+    ...                          [1, 0, 1, 0],
+    ...                          [0, 2, 0, 0],
+    ...                          [2, 0, 0, 0],
+    ...                          [2, 0, 0, 0],
+    ...                          [0, 0, 2, 0],
+    ...                          [0, 0, 2, 0],
+    ...                          [0, 0, 0, 0],
+    ...                          [0, 0, 1, 1]])
+    >>> alpha(value_counts=value_counts, level_of_measurement='nominal')
+    0.69135802469135799
     """
-    if value_domain:
-        assert value_counts.shape[1] == len(value_domain), \
-            "The value domain should be equal to the number of columns of value_counts."
-    else:
-        value_domain = tuple(range(value_counts.shape[1]))
+    if (reliability_data is None) == (value_counts is None):
+        raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
+
+    if reliability_data:
+        if type(reliability_data) is not np.ndarray:
+            reliability_data = np.array(reliability_data)
+
+        value_domain = value_domain or np.unique(reliability_data[~np.isnan(reliability_data)])
+
+        value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
+    else:  # elif value_counts
+        if value_domain:
+            assert value_counts.shape[1] == len(value_domain), \
+                "The value domain should be equal to the number of columns of value_counts."
+        else:
+            value_domain = tuple(range(value_counts.shape[1]))
 
     distance_metric = _distance_metric(level_of_measurement)
 
