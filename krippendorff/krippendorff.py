@@ -224,14 +224,15 @@ def alpha(reliability_data=None, value_counts=None, value_domain=None, level_of_
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
 
-    if reliability_data:
+    # Don't know if it's a list or numpy array. If it's the latter, the truth value is ambiguous. So, ask for None.
+    if value_counts is None:
         if type(reliability_data) is not np.ndarray:
             reliability_data = np.array(reliability_data)
 
         value_domain = value_domain or np.unique(reliability_data[~np.isnan(reliability_data)])
 
         value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
-    else:  # elif value_counts
+    else:  # elif reliability_data is None
         if value_domain:
             assert value_counts.shape[1] == len(value_domain), \
                 "The value domain should be equal to the number of columns of value_counts."
