@@ -8,7 +8,7 @@ setup(
     name="krippendorff",
     version="0.2.2",
     description="Fast computation of the Krippendorff's alpha measure.",
-    long_description=pypandoc.convert('README.md', 'rst'),
+    long_description=pypandoc.convert_file('README.md', 'rst'),
     url="https://github.com/pln-fing-udelar/fast-krippendorff",
     keywords=["Krippendorff", "alpha", "agreement", "reliability", "coding", "coders", "units", "values"],
     classifiers=[
