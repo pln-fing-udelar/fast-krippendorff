@@ -199,10 +199,10 @@ def alpha(reliability_data=None, value_counts=None, value_domain=None, level_of_
     >>> reliability_data = [[np.nan, np.nan, np.nan, np.nan, np.nan, 3, 4, 1, 2, 1, 1, 3, 3, np.nan, 3],
     ...                     [1, np.nan, 2, 1, 3, 3, 4, 3, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
     ...                     [np.nan, np.nan, 2, 1, 3, 4, 4, np.nan, 2, 1, 1, 3, 3, np.nan, 4]]
-    >>> alpha(reliability_data=reliability_data, level_of_measurement='nominal')
-    0.69135802469135799
-    >>> alpha(reliability_data=reliability_data, level_of_measurement='interval')
-    0.81084489281210592
+    >>> print(round(alpha(reliability_data=reliability_data, level_of_measurement='nominal'), 6))
+    0.691358
+    >>> print(round(alpha(reliability_data=reliability_data, level_of_measurement='interval'), 6))
+    0.810845
     >>> value_counts = np.array([[1, 0, 0, 0],
     ...                          [0, 0, 0, 0],
     ...                          [0, 2, 0, 0],
@@ -218,8 +218,8 @@ def alpha(reliability_data=None, value_counts=None, value_domain=None, level_of_
     ...                          [0, 0, 2, 0],
     ...                          [0, 0, 0, 0],
     ...                          [0, 0, 1, 1]])
-    >>> alpha(value_counts=value_counts, level_of_measurement='nominal')
-    0.69135802469135799
+    >>> print(round(alpha(value_counts=value_counts, level_of_measurement='nominal'), 6))
+    0.691358
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
