@@ -223,7 +223,7 @@ def alpha(reliability_data=None, value_counts=None, value_domain=None, level_of_
     >>> reliability_data = [[1, 2, 3, 3, 2, 1, 4, 1, 2, np.nan, np.nan, np.nan],
     ...                     [1, 2, 3, 3, 2, 2, 4, 1, 2, 5, np.nan, 3.],
     ...                     [np.nan, 3, 3, 3, 2, 3, 4, 2, 2, 5, 1, np.nan],
-    ...                     [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, np.nan]])
+    ...                     [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, np.nan]]
     >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
     0.815  # See https://www.statisticshowto.datasciencecentral.com/wp-content/uploads/2016/07/fulltext.pdf, page 8.
     """
