@@ -55,8 +55,8 @@ def _coincidences(value_counts, value_domain, dtype=np.float64):
     pairable = np.maximum(np.sum(value_counts, axis=1), 2)
     diagonals = np.tile(np.eye(len(value_domain)), (len(value_counts), 1, 1)) \
         * value_counts.reshape((value_counts.shape[0], 1, value_counts.shape[1]))
-    denormalized_coincidences = value_counts_matrices * value_counts_matrices.transpose((0, 2, 1)) - diagonals
-    return np.sum(np.divide(denormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype), axis=0)
+    unnormalized_coincidences = value_counts_matrices * value_counts_matrices.transpose((0, 2, 1)) - diagonals
+    return np.sum(np.divide(unnormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype), axis=0)
 
 
 def _random_coincidences(value_domain, n, n_v):
