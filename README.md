@@ -24,7 +24,7 @@ See `sample.py` and `alpha` docstring for more.
 
 ## Installation
 
-```shell
+```bash
 pip install krippendorff
 ```
 
