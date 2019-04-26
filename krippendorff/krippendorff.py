@@ -17,6 +17,8 @@ def _nominal_metric(v1, v2, **_kwargs):
 
 def _ordinal_metric(_v1, _v2, i1, i2, n_v):
     """Metric for ordinal data."""
+    if i1 > i2:
+        i1, i2 = i2, i1
     return (np.sum(n_v[i1:(i2 + 1)]) - (n_v[i1] + n_v[i2]) / 2) ** 2
 
 
@@ -220,6 +222,14 @@ def alpha(reliability_data=None, value_counts=None, value_domain=None, level_of_
     ...                          [0, 0, 1, 1]])
     >>> print(round(alpha(value_counts=value_counts, level_of_measurement='nominal'), 6))
     0.691358
+    >>> # The following example comes from
+    >>> # https://www.statisticshowto.datasciencecentral.com/wp-content/uploads/2016/07/fulltext.pdf, page 8.
+    >>> reliability_data = [[1, 2, 3, 3, 2, 1, 4, 1, 2, np.nan, np.nan, np.nan],
+    ...                     [1, 2, 3, 3, 2, 2, 4, 1, 2, 5, np.nan, 3.],
+    ...                     [np.nan, 3, 3, 3, 2, 3, 4, 2, 2, 5, 1, np.nan],
+    ...                     [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, np.nan]]
+    >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
+    0.815
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
