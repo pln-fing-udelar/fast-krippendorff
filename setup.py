@@ -6,7 +6,7 @@ import pypandoc
 
 setup(
     name="krippendorff",
-    version="0.3.1",
+    version="0.3.2-unreleased",
     description="Fast computation of the Krippendorff's alpha measure.",
     long_description=pypandoc.convert_file('README.md', 'rst'),
     url="https://github.com/pln-fing-udelar/fast-krippendorff",
