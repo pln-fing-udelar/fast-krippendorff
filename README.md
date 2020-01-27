@@ -20,7 +20,7 @@ reliability_data = ...
 krippendorff.alpha(reliability_data)
 ```
 
-See `sample.py` and `alpha`'s docstring for more.
+See `sample.py` and `alpha`'s docstring for more details.
 
 ## Installation
 
