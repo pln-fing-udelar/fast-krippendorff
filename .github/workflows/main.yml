@@ -1,5 +1,5 @@
 name: CI
-on: [push]
+on: push
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -8,17 +8,13 @@ jobs:
       matrix:
         python-version: [3.5, 3.6, 3.7, 3.8]
     steps:
-    - uses: actions/checkout@v1
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v1
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install Poetry
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install --user poetry
+    - name: Checkout
+      uses: actions/checkout@v2
     - name: Install dependencies
-      run: poetry install
+      uses: abatilo/actions-poetry@v1.1.0
+      with:
+        python_version: ${{ matrix.python-version }}
+        args: install
     - name: Check package setup
       run: poetry check
     - name: Test
