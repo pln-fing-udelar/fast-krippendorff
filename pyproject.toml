@@ -1,3 +1,38 @@
+[tool.poetry]
+name = "krippendorff"
+version = "0.3.3-dev"
+description = "Fast computation of the Krippendorff's alpha measure."
+authors = ["Santiago Castro <sacastro@fing.edu.uy>"]
+license = "GPL-3.0-or-later"
+
+readme = "README.md"
+
+homepage = "https://github.com/pln-fing-udelar/fast-krippendorff"
+repository = "https://github.com/pln-fing-udelar/fast-krippendorff"
+
+keywords = ["Krippendorff", "alpha", "agreement", "reliability", "coding", "coders", "units", "values"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.5",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[tool.poetry.dependencies]
+python = "^3.5"
+numpy = "*"
+
+[tool.poetry.dev-dependencies]
+pytest = "*"
+
 [build-system]
-requires = ["setuptools>=40.0.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"

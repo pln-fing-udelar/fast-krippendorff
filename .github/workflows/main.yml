@@ -13,12 +13,13 @@ jobs:
       uses: actions/setup-python@v1
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
+    - name: Install Poetry
       run: |
         python -m pip install --upgrade pip
-        pip install --editable .
-        pip install -r requirements-dev.txt
+        python -m pip install --user poetry
+    - name: Install dependencies
+      run: poetry install
     - name: Check package setup
-      run: python setup.py check
+      run: poetry check
     - name: Test
       run: pytest --doctest-modules
