@@ -10,12 +10,16 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v2
-    - name: Install dependencies
-      uses: abatilo/actions-poetry@v1.1.0
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v1
       with:
-        python_version: ${{ matrix.python-version }}
-        args: install
+        python-version: ${{ matrix.python-version }}
+    # See https://github.com/python-poetry/poetry/issues/366
+    - name: Install Poetry
+      run: pip install poetry
     - name: Check package setup
       run: poetry check
+    - name: Install dependencies
+      run: poetry install
     - name: Test
       run: pytest --doctest-modules
