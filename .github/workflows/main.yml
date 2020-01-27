@@ -22,4 +22,4 @@ jobs:
     - name: Install dependencies
       run: poetry install
     - name: Test
-      run: pytest --doctest-modules
+      run: poetry run pytest --doctest-modules
