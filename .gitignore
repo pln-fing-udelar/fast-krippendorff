@@ -1,4 +1,7 @@
 build
 dist
 
+# codespaces:
+pythonenv3.8
+
 poetry.lock
