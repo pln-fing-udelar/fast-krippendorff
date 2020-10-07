@@ -6,33 +6,35 @@ For more information, see: https://en.wikipedia.org/wiki/Krippendorff%27s_alpha
 
 The module naming follows the one from the Wikipedia link.
 """
+from numbers import Real
+from typing import Any, Callable, Iterable, Sequence, Sized, Union
 
 import numpy as np
 
 
-def _nominal_metric(v1, v2, **_kwargs):
+def _nominal_metric(v1: Any, v2: Any, **kwargs) -> float:  # noqa
     """Metric for nominal data."""
     return v1 != v2
 
 
-def _ordinal_metric(_v1, _v2, i1, i2, n_v):
+def _ordinal_metric(v1: Any, v2: Any, i1: int, i2: int, n_v: np.ndarray) -> float:  # noqa
     """Metric for ordinal data."""
     if i1 > i2:
         i1, i2 = i2, i1
-    return (np.sum(n_v[i1:(i2 + 1)]) - (n_v[i1] + n_v[i2]) / 2) ** 2
+    return (n_v[i1:(i2 + 1)].sum() - (n_v[i1] + n_v[i2]) / 2) ** 2
 
 
-def _interval_metric(v1, v2, **_kwargs):
+def _interval_metric(v1: Real, v2: Real, **kwargs) -> float:  # noqa
     """Metric for interval data."""
     return (v1 - v2) ** 2
 
 
-def _ratio_metric(v1, v2, **_kwargs):
+def _ratio_metric(v1: Real, v2: Real, **kwargs) -> float:  # noqa
     """Metric for ratio data."""
-    return (((v1 - v2) / (v1 + v2)) ** 2) if v1 + v2 != 0 else 0
+    return 0 if v1 + v2 == 0 else ((v1 - v2) / (v1 + v2)) ** 2
 
 
-def _coincidences(value_counts, value_domain, dtype=np.float64):
+def _coincidences(value_counts: np.ndarray, value_domain: Sized, dtype: Any = np.float64) -> np.ndarray:
     """Coincidence matrix.
 
     Parameters
@@ -54,14 +56,14 @@ def _coincidences(value_counts, value_domain, dtype=np.float64):
         Coincidence matrix.
     """
     value_counts_matrices = value_counts.reshape(value_counts.shape + (1,))
-    pairable = np.maximum(np.sum(value_counts, axis=1), 2)
+    pairable = np.maximum(value_counts.sum(axis=1), 2)
     diagonals = np.tile(np.eye(len(value_domain)), (len(value_counts), 1, 1)) \
         * value_counts.reshape((value_counts.shape[0], 1, value_counts.shape[1]))
     unnormalized_coincidences = value_counts_matrices * value_counts_matrices.transpose((0, 2, 1)) - diagonals
-    return np.sum(np.divide(unnormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype), axis=0)
+    return np.divide(unnormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype).sum(axis=0)
 
 
-def _random_coincidences(value_domain, n, n_v):
+def _random_coincidences(value_domain: Sized, n: int, n_v: np.ndarray) -> np.ndarray:
     """Random coincidence matrix.
 
     Parameters
@@ -82,10 +84,11 @@ def _random_coincidences(value_domain, n, n_v):
         Random coincidence matrix.
     """
     n_v_column = n_v.reshape(-1, 1)
-    return (n_v_column.dot(n_v_column.T) - np.eye(len(value_domain)) * n_v_column) / (n - 1)
+    return (n_v_column @ n_v_column.T - np.eye(len(value_domain)) * n_v_column) / (n - 1)
 
 
-def _distances(value_domain, distance_metric, n_v):
+def _distances(value_domain: Iterable[Any], distance_metric: Callable[..., float],
+               n_v: np.ndarray) -> np.ndarray:
     """Distances of the different possible values.
 
     Parameters
@@ -110,7 +113,7 @@ def _distances(value_domain, distance_metric, n_v):
                      for i1, v1 in enumerate(value_domain)])
 
 
-def _distance_metric(level_of_measurement):
+def _distance_metric(level_of_measurement: Union[str, Callable[..., float]]) -> Callable[..., float]:
     """Distance metric callable of the level of measurement.
 
     Parameters
@@ -132,12 +135,7 @@ def _distance_metric(level_of_measurement):
     }.get(level_of_measurement, level_of_measurement)
 
 
-def _transpose_list(list_of_lists):
-    """Transpose a list of lists."""
-    return list(map(list, zip(*list_of_lists)))
-
-
-def _reliability_data_to_value_counts(reliability_data, value_domain):
+def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain: Iterable[Any]) -> np.ndarray:
     """Return the value counts given the reliability data.
 
     Parameters
@@ -159,8 +157,8 @@ def _reliability_data_to_value_counts(reliability_data, value_domain):
     return np.array([[sum(1 for rate in unit if rate == v) for v in value_domain] for unit in reliability_data.T])
 
 
-def alpha(reliability_data=None, value_counts=None, value_domain=None, level_of_measurement='interval',
-          dtype=np.float64):
+def alpha(reliability_data: Iterable[Any] = None, value_counts: np.ndarray = None, value_domain: Sequence[Any] = None,
+          level_of_measurement: Union[str, Callable[..., Any]] = 'interval', dtype: Any = np.float64) -> float:
     """Compute Krippendorff's alpha.
 
     See https://en.wikipedia.org/wiki/Krippendorff%27s_alpha for more information.
@@ -254,8 +252,8 @@ def alpha(reliability_data=None, value_counts=None, value_domain=None, level_of_
     distance_metric = _distance_metric(level_of_measurement)
 
     o = _coincidences(value_counts, value_domain, dtype=dtype)
-    n_v = np.sum(o, axis=0)
-    n = np.sum(n_v)
+    n_v = o.sum(axis=0)
+    n = n_v.sum()
     e = _random_coincidences(value_domain, n, n_v)
     d = _distances(value_domain, distance_metric, n_v)
-    return 1 - np.sum(o * d) / np.sum(e * d)
+    return 1 - (o * d).sum() / (e * d).sum()
