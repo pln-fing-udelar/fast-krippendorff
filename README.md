@@ -30,4 +30,4 @@ pip install krippendorff
 
 ## Caveats
 
-The implementation is fast as it doesn't do a nested loop for the coders. However, V should be small, since a matrix of VxV it's used.
+The implementation is fast as it doesn't do a nested loop for the coders. However, `V` should be small, since a `V^2` matrix it's used.
