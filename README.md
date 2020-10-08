@@ -7,7 +7,7 @@
 
 Fast computation of [Krippendorff's alpha](https://en.wikipedia.org/wiki/Krippendorff%27s_alpha) agreement measure.
 
-Based on [Thomas Grill implementation](https://github.com/grrrr/krippendorff-alpha). Works on Python 3.5+.
+Based on [Thomas Grill implementation](https://github.com/grrrr/krippendorff-alpha).
 
 ## Example usage
 
