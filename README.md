@@ -16,8 +16,7 @@ Given a reliability data matrix, run:
 ```python
 import krippendorff
 
-reliability_data = ...
-krippendorff.alpha(reliability_data)
+krippendorff.alpha(reliability_data=...)
 ```
 
 See `sample.py` and `alpha`'s docstring for more details.
