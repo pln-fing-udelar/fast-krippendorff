@@ -154,7 +154,9 @@ def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain
         Number of coders that assigned a certain value to a determined unit, where N is the number of units
         and V is the value count.
     """
-    return np.array([[sum(1 for rate in unit if rate == v) for v in value_domain] for unit in reliability_data.T])
+    if type(value_domain) is not np.ndarray:
+        value_domain = np.array(value_domain)
+    return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)
 
 
 def alpha(reliability_data: Iterable[Any] = None, value_counts: np.ndarray = None, value_domain: Sequence[Any] = None,
