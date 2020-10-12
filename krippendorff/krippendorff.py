@@ -225,13 +225,24 @@ def alpha(reliability_data: Iterable[Any] = None, value_counts: np.ndarray = Non
     >>> # The following examples were extracted from
     >>> # https://www.statisticshowto.datasciencecentral.com/wp-content/uploads/2016/07/fulltext.pdf, page 8.
     >>> reliability_data = [[1, 2, 3, 3, 2, 1, 4, 1, 2, np.nan, np.nan, np.nan],
-    ...                     [1, 2, 3, 3, 2, 2, 4, 1, 2, 5, np.nan, 3.],
+    ...                     [1, 2, 3, 3, 2, 2, 4, 1, 2, 5, np.nan, 3],
     ...                     [np.nan, 3, 3, 3, 2, 3, 4, 2, 2, 5, 1, np.nan],
     ...                     [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, np.nan]]
     >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
     0.815
     >>> print(round(alpha(reliability_data, level_of_measurement='ratio'), 3))
     0.797
+    >>> reliability_data = [["very low", "low", "mid", "mid", "low", "very low", "high", "very low", "low", np.nan,
+    ...                      np.nan, np.nan],
+    ...                     ["very low", "low", "mid", "mid", "low", "low", "high", "very low", "low", "very high",
+    ...                      np.nan, "mid"],
+    ...                     [np.nan, "mid", "mid", "mid", "low", "mid", "high", "low", "low", "very high", "very low",
+    ...                      np.nan],
+    ...                     ["very low", "low", "mid", "mid", "low", "high", "high", "very low", "low", "very high",
+    ...                      "very low", np.nan]]
+    >>> print(round(alpha(reliability_data, level_of_measurement='ordinal',
+    ...                   value_domain=["very low", "low", "mid", "high", "very high"]), 3))
+    0.815
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
