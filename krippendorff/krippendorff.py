@@ -6,32 +6,36 @@ For more information, see: https://en.wikipedia.org/wiki/Krippendorff%27s_alpha
 
 The module naming follows the one from the Wikipedia link.
 """
-from numbers import Real
-from typing import Any, Callable, Iterable, Sequence, Sized, Union
+from typing import Any, Callable, Iterable, Optional, Sequence, Sized, Union
 
 import numpy as np
 
 
-def _nominal_metric(v1: Any, v2: Any, **kwargs) -> float:  # noqa
+def _nominal_metric(v1: np.ndarray, v2: np.ndarray, **kwargs) -> np.ndarray:  # noqa
     """Metric for nominal data."""
     return v1 != v2
 
 
-def _ordinal_metric(v1: Any, v2: Any, i1: int, i2: int, n_v: np.ndarray) -> float:  # noqa
+def _ordinal_metric(v1: np.ndarray, v2: np.ndarray, i1: np.ndarray, i2: np.ndarray,  # noqa
+                    n_v: np.ndarray) -> np.ndarray:
     """Metric for ordinal data."""
-    if i1 > i2:
-        i1, i2 = i2, i1
-    return (n_v[i1:(i2 + 1)].sum() - (n_v[i1] + n_v[i2]) / 2) ** 2
+    i1, i2 = np.minimum(i1, i2), np.maximum(i1, i2)
+
+    ranges = np.dstack((i1, i2 + 1))
+    sums_between_indices = np.add.reduceat(np.append(n_v, 0), ranges.reshape(-1))[::2].reshape(*i1.shape)
+
+    return (sums_between_indices - (n_v[i1] + n_v[i2]) / 2) ** 2
 
 
-def _interval_metric(v1: Real, v2: Real, **kwargs) -> float:  # noqa
+def _interval_metric(v1: np.ndarray, v2: np.ndarray, **kwargs) -> np.ndarray:  # noqa
     """Metric for interval data."""
     return (v1 - v2) ** 2
 
 
-def _ratio_metric(v1: Real, v2: Real, **kwargs) -> float:  # noqa
+def _ratio_metric(v1: np.ndarray, v2: np.ndarray, **kwargs) -> np.ndarray:  # noqa
     """Metric for ratio data."""
-    return 0 if v1 + v2 == 0 else ((v1 - v2) / (v1 + v2)) ** 2
+    v1_plus_v2 = v1 + v2
+    return np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0) ** 2
 
 
 def _coincidences(value_counts: np.ndarray, value_domain: Sized, dtype: Any = np.float64) -> np.ndarray:
@@ -55,10 +59,9 @@ def _coincidences(value_counts: np.ndarray, value_domain: Sized, dtype: Any = np
     o : ndarray, with shape (V, V)
         Coincidence matrix.
     """
-    value_counts_matrices = value_counts.reshape(value_counts.shape + (1,))
     pairable = np.maximum(value_counts.sum(axis=1), 2)
-    diagonals = np.tile(np.eye(len(value_domain)), (len(value_counts), 1, 1)) \
-        * value_counts.reshape((value_counts.shape[0], 1, value_counts.shape[1]))
+    diagonals = np.tile(np.eye(len(value_domain)), (len(value_counts), 1, 1)) * value_counts[:, np.newaxis, :]
+    value_counts_matrices = value_counts[..., np.newaxis]
     unnormalized_coincidences = value_counts_matrices * value_counts_matrices.transpose((0, 2, 1)) - diagonals
     return np.divide(unnormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype).sum(axis=0)
 
@@ -83,17 +86,15 @@ def _random_coincidences(value_domain: Sized, n: int, n_v: np.ndarray) -> np.nda
     e : ndarray, with shape (V, V)
         Random coincidence matrix.
     """
-    n_v_column = n_v.reshape(-1, 1)
-    return (n_v_column @ n_v_column.T - np.eye(len(value_domain)) * n_v_column) / (n - 1)
+    return (n_v[:, np.newaxis] @ n_v[np.newaxis, :] - np.eye(len(value_domain)) * n_v[:, np.newaxis]) / (n - 1)
 
 
-def _distances(value_domain: Iterable[Any], distance_metric: Callable[..., float],
-               n_v: np.ndarray) -> np.ndarray:
+def _distances(value_domain: np.ndarray, distance_metric: Callable[..., np.ndarray], n_v: np.ndarray) -> np.ndarray:
     """Distances of the different possible values.
 
     Parameters
     ----------
-    value_domain : array_like, with shape (V,)
+    value_domain : ndarray, with shape (V,)
         Possible values V the units can take.
         If the level of measurement is not nominal, it must be ordered.
 
@@ -108,12 +109,12 @@ def _distances(value_domain: Iterable[Any], distance_metric: Callable[..., float
     d : ndarray, with shape (V, V)
         Distance matrix for each value pair.
     """
-    return np.array([[distance_metric(v1, v2, i1=i1, i2=i2, n_v=n_v)
-                      for i2, v2 in enumerate(value_domain)]
-                     for i1, v1 in enumerate(value_domain)])
+    indices = np.arange(len(value_domain))
+    return distance_metric(value_domain[:, np.newaxis], value_domain[np.newaxis, :], i1=indices[:, np.newaxis],
+                           i2=indices[np.newaxis, :], n_v=n_v)
 
 
-def _distance_metric(level_of_measurement: Union[str, Callable[..., float]]) -> Callable[..., float]:
+def _distance_metric(level_of_measurement: Union[str, Callable[..., np.ndarray]]) -> Callable[..., np.ndarray]:
     """Distance metric callable of the level of measurement.
 
     Parameters
@@ -135,7 +136,7 @@ def _distance_metric(level_of_measurement: Union[str, Callable[..., float]]) -> 
     }.get(level_of_measurement, level_of_measurement)
 
 
-def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain: Iterable[Any]) -> np.ndarray:
+def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain: np.ndarray) -> np.ndarray:
     """Return the value counts given the reliability data.
 
     Parameters
@@ -145,7 +146,7 @@ def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain
         and N is the unit count.
         Missing rates are represented with `np.nan`.
 
-    value_domain : array_like, with shape (V,)
+    value_domain : ndarray, with shape (V,)
         Possible values the units can take.
 
     Returns
@@ -154,12 +155,11 @@ def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain
         Number of coders that assigned a certain value to a determined unit, where N is the number of units
         and V is the value count.
     """
-    if type(value_domain) is not np.ndarray:
-        value_domain = np.array(value_domain)
-    return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)
+    return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)  # noqa
 
 
-def alpha(reliability_data: Iterable[Any] = None, value_counts: np.ndarray = None, value_domain: Sequence[Any] = None,
+def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Optional[np.ndarray] = None,
+          value_domain: Optional[Sequence[Any]] = None,
           level_of_measurement: Union[str, Callable[..., Any]] = 'interval', dtype: Any = np.float64) -> float:
     """Compute Krippendorff's alpha.
 
@@ -193,7 +193,7 @@ def alpha(reliability_data: Iterable[Any] = None, value_counts: np.ndarray = Non
 
     Returns
     -------
-    alpha : `dtype`
+    alpha : ndarray
         Scalar value of Krippendorff's alpha of type `dtype`.
 
     Examples
@@ -249,18 +249,19 @@ def alpha(reliability_data: Iterable[Any] = None, value_counts: np.ndarray = Non
 
     # Don't know if it's a list or numpy array. If it's the latter, the truth value is ambiguous. So, ask for None.
     if value_counts is None:
-        if type(reliability_data) is not np.ndarray:
-            reliability_data = np.array(reliability_data)
+        reliability_data = np.asarray(reliability_data)
 
         value_domain = value_domain or np.unique(reliability_data[~np.isnan(reliability_data)])
+        value_domain = np.asarray(value_domain)
 
         value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
     else:  # elif reliability_data is None
-        if value_domain:
+        if value_domain is None:
+            value_domain = np.arange(value_counts.shape[1])
+        else:
             assert value_counts.shape[1] == len(value_domain), \
                 "The value domain should be equal to the number of columns of value_counts."
-        else:
-            value_domain = tuple(range(value_counts.shape[1]))
+            value_domain = np.asarray(value_domain)
 
     distance_metric = _distance_metric(level_of_measurement)
 
