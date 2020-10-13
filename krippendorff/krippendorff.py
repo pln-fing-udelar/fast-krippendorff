@@ -11,9 +11,9 @@ from typing import Any, Callable, Iterable, Optional, Sequence, Union
 import numpy as np
 
 
-def _nominal_metric(v1: np.ndarray, v2: np.ndarray, **kwargs) -> np.ndarray:  # noqa
+def _nominal_metric(v1: np.ndarray, v2: np.ndarray, dtype: Any = np.float64, **kwargs) -> np.ndarray:  # noqa
     """Metric for nominal data."""
-    return v1 != v2
+    return (v1 != v2).astype(dtype)
 
 
 def _ordinal_metric(v1: np.ndarray, v2: np.ndarray, i1: np.ndarray, i2: np.ndarray,  # noqa
@@ -27,9 +27,9 @@ def _ordinal_metric(v1: np.ndarray, v2: np.ndarray, i1: np.ndarray, i2: np.ndarr
     return (sums_between_indices - np.divide(n_v[i1] + n_v[i2], 2, dtype=dtype)) ** 2
 
 
-def _interval_metric(v1: np.ndarray, v2: np.ndarray, **kwargs) -> np.ndarray:  # noqa
+def _interval_metric(v1: np.ndarray, v2: np.ndarray, dtype: Any = np.float64, **kwargs) -> np.ndarray:  # noqa
     """Metric for interval data."""
-    return (v1 - v2) ** 2
+    return (v1 - v2).astype(dtype) ** 2
 
 
 def _ratio_metric(v1: np.ndarray, v2: np.ndarray, dtype: Any = np.float64, **kwargs) -> np.ndarray:  # noqa
@@ -264,6 +264,8 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
             value_domain = np.asarray(value_domain)
             assert value_counts.shape[1] == len(value_domain), \
                 "The value domain should be equal to the number of columns of value_counts."
+
+    assert len(value_domain) > 1, "There has to be more than one value in the domain."
 
     distance_metric = _distance_metric(level_of_measurement)
 
