@@ -241,6 +241,8 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     >>> print(round(alpha(reliability_data, level_of_measurement='ordinal',
     ...                   value_domain=["very low", "low", "mid", "high", "very high"]), 3))
     0.815
+    >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
+    0.815
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
