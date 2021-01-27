@@ -226,6 +226,8 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     ...                     [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, np.nan]]
     >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
     0.815
+    >>> print(round(alpha(reliability_data, value_domain=[1,2,3,4,5], level_of_measurement='ordinal'), 3))
+    0.815
     >>> print(round(alpha(reliability_data, level_of_measurement='ratio'), 3))
     0.797
     >>> reliability_data = [["very low", "low", "mid", "mid", "low", "very low", "high", "very low", "low", np.nan,
