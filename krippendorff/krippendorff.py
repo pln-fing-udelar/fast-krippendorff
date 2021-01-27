@@ -255,8 +255,6 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
             value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
         else:
             value_domain = np.asarray(value_domain)
-            assert np.isin(reliability_data, np.append(value_domain, np.nan)).all(), \
-                "The reliability data contains out-of-domain values."
 
         value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
     else:  # elif reliability_data is None
