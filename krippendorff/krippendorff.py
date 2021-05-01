@@ -226,6 +226,8 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     ...                     [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, np.nan]]
     >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
     0.815
+    >>> print(round(alpha(reliability_data, value_domain=[1,2,3,4,5], level_of_measurement='ordinal'), 3))
+    0.815
     >>> print(round(alpha(reliability_data, level_of_measurement='ratio'), 3))
     0.797
     >>> reliability_data = [["very low", "low", "mid", "mid", "low", "very low", "high", "very low", "low", np.nan,
@@ -239,6 +241,8 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     >>> print(round(alpha(reliability_data, level_of_measurement='ordinal',
     ...                   value_domain=["very low", "low", "mid", "high", "very high"]), 3))
     0.815
+    >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
+    0.815
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
@@ -251,8 +255,6 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
             value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
         else:
             value_domain = np.asarray(value_domain)
-            assert np.isin(reliability_data, np.append(value_domain, np.nan)).all(), \
-                "The reliability data contains out-of-domain values."
 
         value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
     else:  # elif reliability_data is None
