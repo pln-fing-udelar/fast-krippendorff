@@ -25,6 +25,8 @@ jobs:
       run: pip install --upgrade pip wheel
     - name: Set up Poetry
       uses: abatilo/actions-poetry@v2.1.3
+      with:
+        poetry-version: 1.1.11  # Previous versions give an error with Python 3.10.
     - name: Check package setup
       run: poetry check
     - name: Install dependencies
