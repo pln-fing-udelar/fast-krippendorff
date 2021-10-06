@@ -12,7 +12,7 @@ jobs:
       with:
         python-version: '3.x'
     - name: Install the latest Pip and Wheel
-    - run: pip install --upgrade pip wheel
+      run: pip install --upgrade pip wheel
     - name: Set up Poetry
       uses: abatilo/actions-poetry@v2.1.3
     - name: Build and publish
