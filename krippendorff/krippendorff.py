@@ -226,6 +226,8 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     ...                     [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, np.nan]]
     >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
     0.815
+    >>> print(round(alpha(reliability_data, value_domain=[1,2,3,4,5], level_of_measurement='ordinal'), 3))
+    0.815
     >>> print(round(alpha(reliability_data, level_of_measurement='ratio'), 3))
     0.797
     >>> reliability_data = [["very low", "low", "mid", "mid", "low", "very low", "high", "very low", "low", np.nan,
@@ -239,6 +241,9 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     >>> print(round(alpha(reliability_data, level_of_measurement='ordinal',
     ...                   value_domain=["very low", "low", "mid", "high", "very high"]), 3))
     0.815
+    >>> # Note that without an ordered value_domain, we can only calculate nominal distances on strings.
+    >>> print(round(alpha(reliability_data, level_of_measurement='nominal'), 3))
+    0.743
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
@@ -247,11 +252,28 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     if value_counts is None:
         reliability_data = np.asarray(reliability_data)
 
+        kind = reliability_data.dtype.kind
+        # np.isnan only operates on signed integers, unsigned integers, and floats, not strings.
+        if kind in ['i', 'u', 'f']:
+            found_value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
+        # Is it a Unicode or byte string?
+        elif kind in ['U', 'S']:
+            # np.asarray will coerce np.nan values to 'nan'
+            found_value_domain = np.unique(reliability_data[reliability_data != 'nan'])
+        else:
+            raise ValueError("Don't know how to construct value domain for dtype kind {kind}.")
+
         if value_domain is None:
-            value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
+            # Check if Unicode or byte string
+            if kind in ['U', 'S'] and level_of_measurement != 'nominal':
+                raise ValueError("When using strings, an ordered value_domain is required "
+                                 "for level_of_measurement other than 'nominal'.")
+            value_domain = found_value_domain
         else:
             value_domain = np.asarray(value_domain)
-            assert np.isin(reliability_data, np.append(value_domain, np.nan)).all(), \
+            # Note: We do not need to test for np.nan in the input data.
+            # np.nan indicates the absence of a domain value and is always allowed.
+            assert np.isin(found_value_domain, value_domain).all(), \
                 "The reliability data contains out-of-domain values."
 
         value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
