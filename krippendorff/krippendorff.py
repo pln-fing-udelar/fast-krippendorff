@@ -117,7 +117,7 @@ def _distance_metric(level_of_measurement: Union[str, Callable[..., np.ndarray]]
     ----------
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of 'nominal', 'ordinal', 'interval', 'ratio' or a callable.
+        It must be one of "nominal", "ordinal", "interval", "ratio", or a callable.
 
     Returns
     -------
@@ -125,10 +125,10 @@ def _distance_metric(level_of_measurement: Union[str, Callable[..., np.ndarray]]
         Distance callable.
     """
     return {
-        'nominal': _nominal_metric,
-        'ordinal': _ordinal_metric,
-        'interval': _interval_metric,
-        'ratio': _ratio_metric,
+        "nominal": _nominal_metric,
+        "ordinal": _ordinal_metric,
+        "interval": _interval_metric,
+        "ratio": _ratio_metric,
     }.get(level_of_measurement, level_of_measurement)
 
 
@@ -156,7 +156,7 @@ def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain
 
 def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Optional[np.ndarray] = None,
           value_domain: Optional[Sequence[Any]] = None,
-          level_of_measurement: Union[str, Callable[..., Any]] = 'interval', dtype: Any = np.float64) -> float:
+          level_of_measurement: Union[str, Callable[..., Any]] = "interval", dtype: Any = np.float64) -> float:
     """Compute Krippendorff's alpha.
 
     See https://en.wikipedia.org/wiki/Krippendorff%27s_alpha for more information.
@@ -182,7 +182,7 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
 
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of 'nominal', 'ordinal', 'interval', 'ratio' or a callable.
+        It must be one of "nominal", "ordinal", "interval", "ratio", or a callable.
 
     dtype : data-type
         Result and computation data-type.
@@ -197,9 +197,9 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     >>> reliability_data = [[np.nan, np.nan, np.nan, np.nan, np.nan, 3, 4, 1, 2, 1, 1, 3, 3, np.nan, 3],
     ...                     [1, np.nan, 2, 1, 3, 3, 4, 3, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
     ...                     [np.nan, np.nan, 2, 1, 3, 4, 4, np.nan, 2, 1, 1, 3, 3, np.nan, 4]]
-    >>> print(round(alpha(reliability_data=reliability_data, level_of_measurement='nominal'), 6))
+    >>> print(round(alpha(reliability_data=reliability_data, level_of_measurement="nominal"), 6))
     0.691358
-    >>> print(round(alpha(reliability_data=reliability_data, level_of_measurement='interval'), 6))
+    >>> print(round(alpha(reliability_data=reliability_data, level_of_measurement="interval"), 6))
     0.810845
     >>> value_counts = np.array([[1, 0, 0, 0],
     ...                          [0, 0, 0, 0],
@@ -216,7 +216,7 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     ...                          [0, 0, 2, 0],
     ...                          [0, 0, 0, 0],
     ...                          [0, 0, 1, 1]])
-    >>> print(round(alpha(value_counts=value_counts, level_of_measurement='nominal'), 6))
+    >>> print(round(alpha(value_counts=value_counts, level_of_measurement="nominal"), 6))
     0.691358
     >>> # The following examples were extracted from
     >>> # https://www.statisticshowto.datasciencecentral.com/wp-content/uploads/2016/07/fulltext.pdf, page 8.
@@ -224,11 +224,11 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     ...                     [1, 2, 3, 3, 2, 2, 4, 1, 2, 5, np.nan, 3],
     ...                     [np.nan, 3, 3, 3, 2, 3, 4, 2, 2, 5, 1, np.nan],
     ...                     [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, np.nan]]
-    >>> print(round(alpha(reliability_data, level_of_measurement='ordinal'), 3))
+    >>> print(round(alpha(reliability_data, level_of_measurement="ordinal"), 3))
     0.815
-    >>> print(round(alpha(reliability_data, value_domain=[1,2,3,4,5], level_of_measurement='ordinal'), 3))
+    >>> print(round(alpha(reliability_data, value_domain=[1,2,3,4,5], level_of_measurement="ordinal"), 3))
     0.815
-    >>> print(round(alpha(reliability_data, level_of_measurement='ratio'), 3))
+    >>> print(round(alpha(reliability_data, level_of_measurement="ratio"), 3))
     0.797
     >>> reliability_data = [["very low", "low", "mid", "mid", "low", "very low", "high", "very low", "low", np.nan,
     ...                      np.nan, np.nan],
@@ -238,11 +238,11 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
     ...                      np.nan],
     ...                     ["very low", "low", "mid", "mid", "low", "high", "high", "very low", "low", "very high",
     ...                      "very low", np.nan]]
-    >>> print(round(alpha(reliability_data, level_of_measurement='ordinal',
+    >>> print(round(alpha(reliability_data, level_of_measurement="ordinal",
     ...                   value_domain=["very low", "low", "mid", "high", "very high"]), 3))
     0.815
     >>> # Note that without an ordered value_domain, we can only calculate nominal distances on strings.
-    >>> print(round(alpha(reliability_data, level_of_measurement='nominal'), 3))
+    >>> print(round(alpha(reliability_data, level_of_measurement="nominal"), 3))
     0.743
     """
     if (reliability_data is None) == (value_counts is None):
@@ -253,19 +253,18 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
         reliability_data = np.asarray(reliability_data)
 
         kind = reliability_data.dtype.kind
-        # np.isnan only operates on signed integers, unsigned integers, and floats, not strings.
-        if kind in ['i', 'u', 'f']:
+        if kind in {"i", "u", "f"}:
+            # np.isnan only operates on signed integers, unsigned integers, and floats, not strings.
             found_value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
-        # Is it a Unicode or byte string?
-        elif kind in ['U', 'S']:
-            # np.asarray will coerce np.nan values to 'nan'
-            found_value_domain = np.unique(reliability_data[reliability_data != 'nan'])
+        elif kind in {"U", "S"}:  # Unicode or byte string.
+            # np.asarray will coerce np.nan values to "nan".
+            found_value_domain = np.unique(reliability_data[reliability_data != "nan"])
         else:
             raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
         if value_domain is None:
             # Check if Unicode or byte string
-            if kind in ['U', 'S'] and level_of_measurement != 'nominal':
+            if kind in {"U", "S"} and level_of_measurement != "nominal":
                 raise ValueError("When using strings, an ordered value_domain is required "
                                  "for level_of_measurement other than 'nominal'.")
             value_domain = found_value_domain
@@ -277,7 +276,7 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
                 "The reliability data contains out-of-domain values."
 
         value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
-    else:  # elif reliability_data is None
+    else:
         value_counts = np.asarray(value_counts)
 
         if value_domain is None:
