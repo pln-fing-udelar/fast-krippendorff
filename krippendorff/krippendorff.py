@@ -261,7 +261,7 @@ def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Option
             # np.asarray will coerce np.nan values to 'nan'
             found_value_domain = np.unique(reliability_data[reliability_data != 'nan'])
         else:
-            raise ValueError("Don't know how to construct value domain for dtype kind {kind}.")
+            raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
         if value_domain is None:
             # Check if Unicode or byte string
