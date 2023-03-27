@@ -92,7 +92,7 @@ def _distances(value_domain: np.ndarray, distance_metric: Callable[..., np.ndarr
         If the level of measurement is not nominal, it must be ordered.
 
     distance_metric : callable
-        Callable that return the distance of two given values.
+        Callable that returns the distance of two given values.
 
     n_v : ndarray, with shape (V,)
         Number of pairable elements for each value.
