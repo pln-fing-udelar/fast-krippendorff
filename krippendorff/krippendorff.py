@@ -15,6 +15,9 @@ import numpy.typing as npt
 
 DEFAULT_DTYPE = np.float64
 
+LevelOfMeasurementCallable = Callable[..., np.ndarray]
+LevelOfMeasurement = str | LevelOfMeasurementCallable
+
 
 def _nominal_metric(v1: np.ndarray, v2: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE,
                     **kwargs) -> np.ndarray:  # noqa
@@ -88,7 +91,7 @@ def _random_coincidences(n_v: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE) 
     return np.divide(np.outer(n_v, n_v) - np.diagflat(n_v), n_v.sum() - 1, dtype=dtype)
 
 
-def _distances(value_domain: np.ndarray, distance_metric: Callable[..., np.ndarray], n_v: np.ndarray,
+def _distances(value_domain: np.ndarray, distance_metric: LevelOfMeasurementCallable, n_v: np.ndarray,
                dtype: npt.DTypeLike = DEFAULT_DTYPE) -> np.ndarray:
     """Distances of the different possible values.
 
@@ -117,7 +120,7 @@ def _distances(value_domain: np.ndarray, distance_metric: Callable[..., np.ndarr
                            i2=indices[np.newaxis, :], n_v=n_v, dtype=dtype)
 
 
-def _distance_metric(level_of_measurement: str | Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
+def _distance_metric(level_of_measurement: LevelOfMeasurement) -> LevelOfMeasurementCallable:
     """Distance metric callable of the level of measurement.
 
     Parameters
@@ -162,8 +165,7 @@ def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain
 
 
 def alpha(reliability_data: Iterable[Any] | None = None, value_counts: np.ndarray | None = None,
-          value_domain: Sequence[Any] | None = None,
-          level_of_measurement: str | Callable[..., Any] = "interval",
+          value_domain: Sequence[Any] | None = None, level_of_measurement: LevelOfMeasurement = "interval",
           dtype: npt.DTypeLike = DEFAULT_DTYPE) -> float:
     """Compute Krippendorff's alpha.
 
