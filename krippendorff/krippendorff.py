@@ -6,11 +6,12 @@ For more information, see: https://en.wikipedia.org/wiki/Krippendorff%27s_alpha
 
 The module naming follows the one from the Wikipedia link.
 """
-from typing import Any, Callable, Iterable, Optional, Sequence, Union
+from __future__ import annotations
+
+from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
 import numpy.typing as npt
-
 
 DEFAULT_DTYPE = np.float64
 
@@ -116,7 +117,7 @@ def _distances(value_domain: np.ndarray, distance_metric: Callable[..., np.ndarr
                            i2=indices[np.newaxis, :], n_v=n_v, dtype=dtype)
 
 
-def _distance_metric(level_of_measurement: Union[str, Callable[..., np.ndarray]]) -> Callable[..., np.ndarray]:
+def _distance_metric(level_of_measurement: str | Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
     """Distance metric callable of the level of measurement.
 
     Parameters
@@ -160,9 +161,9 @@ def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain
     return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)  # noqa
 
 
-def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Optional[np.ndarray] = None,
-          value_domain: Optional[Sequence[Any]] = None,
-          level_of_measurement: Union[str, Callable[..., Any]] = "interval",
+def alpha(reliability_data: Iterable[Any] | None = None, value_counts: np.ndarray | None = None,
+          value_domain: Sequence[Any] | None = None,
+          level_of_measurement: str | Callable[..., Any] = "interval",
           dtype: npt.DTypeLike = DEFAULT_DTYPE) -> float:
     """Compute Krippendorff's alpha.
 
