@@ -299,6 +299,9 @@ def alpha(reliability_data: npt.ArrayLike | None = None, value_counts: npt.Array
     if len(value_domain) <= 1:
         raise ValueError("There has to be more than one value in the domain.")
 
+    if (value_counts.sum(axis=-1) <= 1).all():
+        raise ValueError("There has to be at least one unit with values assigned by at least two coders.")
+
     distance_metric = _distance_metric(level_of_measurement)
 
     o = _coincidences(value_counts, dtype=dtype)
