@@ -28,7 +28,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.8"
-numpy = "^1.20"
+numpy = "^1.21"  # For NumPy Typing.
 
 [tool.poetry.group.test]
 optional = true
