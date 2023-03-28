@@ -293,10 +293,11 @@ def alpha(reliability_data: npt.ArrayLike | None = None, value_counts: npt.Array
             value_domain = np.arange(value_counts.shape[1])
         else:
             value_domain = np.asarray(value_domain)
-            assert value_counts.shape[1] == len(value_domain), \
-                "The value domain should be equal to the number of columns of value_counts."
+            if value_counts.shape[1] != len(value_domain):
+                raise ValueError("The value domain should be equal to the number of columns of value_counts.")
 
-    assert len(value_domain) > 1, "There has to be more than one value in the domain."
+    if len(value_domain) <= 1:
+        raise ValueError("There has to be more than one value in the domain.")
 
     distance_metric = _distance_metric(level_of_measurement)
 
