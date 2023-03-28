@@ -265,10 +265,10 @@ def alpha(reliability_data: npt.ArrayLike | None = None, value_counts: npt.Array
         kind = reliability_data.dtype.kind
         if kind in {"i", "u", "f"}:
             # `np.isnan` only operates on signed integers, unsigned integers, and floats, not strings.
-            found_value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
+            computed_value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
         elif kind in {"U", "S"}:  # Unicode or byte string.
             # `np.asarray` will coerce `np.nan` values to "nan".
-            found_value_domain = np.unique(reliability_data[reliability_data != "nan"])
+            computed_value_domain = np.unique(reliability_data[reliability_data != "nan"])
         else:
             raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
@@ -277,13 +277,13 @@ def alpha(reliability_data: npt.ArrayLike | None = None, value_counts: npt.Array
             if kind in {"U", "S"} and level_of_measurement != "nominal":
                 raise ValueError("When using strings, an ordered value_domain is required "
                                  "for level_of_measurement other than 'nominal'.")
-            value_domain = found_value_domain
+            value_domain = computed_value_domain
         else:
             value_domain = np.asarray(value_domain)
             # Note: We do not need to test for `np.nan` in the input data.
             # `np.nan` indicates the absence of a domain value and is always allowed.
-            assert np.isin(found_value_domain, value_domain).all(), \
-                "The reliability data contains out-of-domain values."
+            if not np.isin(computed_value_domain, value_domain).all():
+                raise ValueError("The reliability data contains out-of-domain values.")
 
         value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
     else:
