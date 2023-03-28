@@ -30,3 +30,18 @@ pip install krippendorff
 ## Caveats
 
 The implementation is fast as it doesn't do a nested loop for the coders. However, `V` should be small, since a `VxV` matrix it's used.
+
+## Citing
+
+If you use this code in your research, please cite Fast Krippendorff:
+
+```bibtex
+@misc{castro-2017-fast-krippendorff,
+  author = {Santiago Castro},
+  title = {Fast {K}rippendorff: Fast computation of {K}rippendorff's alpha agreement measure},
+  year = {2017},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\url{https://github.com/pln-fing-udelar/fast-krippendorff}}
+}
+```
