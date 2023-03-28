@@ -8,7 +8,7 @@ The module naming follows the one from the Wikipedia link.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -16,7 +16,7 @@ import numpy.typing as npt
 DEFAULT_DTYPE = np.float64
 
 LevelOfMeasurementCallable = Callable[..., np.ndarray]
-LevelOfMeasurement = str | LevelOfMeasurementCallable
+LevelOfMeasurement = Union[str, LevelOfMeasurementCallable]  # See https://github.com/python/cpython/issues/86399
 
 
 def _nominal_metric(v1: np.ndarray, v2: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE,
