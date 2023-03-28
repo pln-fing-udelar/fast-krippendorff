@@ -8,7 +8,7 @@ The module naming follows the one from the Wikipedia link.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Sequence, Union
+from typing import Callable, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -164,8 +164,8 @@ def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain
     return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)  # noqa
 
 
-def alpha(reliability_data: Iterable[Any] | None = None, value_counts: np.ndarray | None = None,
-          value_domain: Sequence[Any] | None = None, level_of_measurement: LevelOfMeasurement = "interval",
+def alpha(reliability_data: npt.ArrayLike | None = None, value_counts: npt.ArrayLike | None = None,
+          value_domain: npt.ArrayLike | None = None, level_of_measurement: LevelOfMeasurement = "interval",
           dtype: npt.DTypeLike = DEFAULT_DTYPE) -> float:
     """Compute Krippendorff's alpha.
 
