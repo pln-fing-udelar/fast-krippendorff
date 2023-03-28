@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-import krippendorff
 import numpy as np
+
+import krippendorff
 
 
 def main():
