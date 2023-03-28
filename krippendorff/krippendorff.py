@@ -258,30 +258,30 @@ def alpha(reliability_data: Iterable[Any] | None = None, value_counts: np.ndarra
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
 
-    # Don't know if it's a list or numpy array. If it's the latter, the truth value is ambiguous. So, ask for None.
+    # Don't know if it's a `list` or NumPy array. If it's the latter, the truth value is ambiguous. So, ask for `None`.
     if value_counts is None:
         reliability_data = np.asarray(reliability_data)
 
         kind = reliability_data.dtype.kind
         if kind in {"i", "u", "f"}:
-            # np.isnan only operates on signed integers, unsigned integers, and floats, not strings.
+            # `np.isnan` only operates on signed integers, unsigned integers, and floats, not strings.
             found_value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
         elif kind in {"U", "S"}:  # Unicode or byte string.
-            # np.asarray will coerce np.nan values to "nan".
+            # `np.asarray` will coerce `np.nan` values to "nan".
             found_value_domain = np.unique(reliability_data[reliability_data != "nan"])
         else:
             raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
         if value_domain is None:
-            # Check if Unicode or byte string
+            # Check if Unicode or byte string.
             if kind in {"U", "S"} and level_of_measurement != "nominal":
                 raise ValueError("When using strings, an ordered value_domain is required "
                                  "for level_of_measurement other than 'nominal'.")
             value_domain = found_value_domain
         else:
             value_domain = np.asarray(value_domain)
-            # Note: We do not need to test for np.nan in the input data.
-            # np.nan indicates the absence of a domain value and is always allowed.
+            # Note: We do not need to test for `np.nan` in the input data.
+            # `np.nan` indicates the absence of a domain value and is always allowed.
             assert np.isin(found_value_domain, value_domain).all(), \
                 "The reliability data contains out-of-domain values."
 
