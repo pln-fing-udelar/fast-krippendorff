@@ -12,13 +12,17 @@ import numpy as np
 import numpy.typing as npt
 
 
-def _nominal_metric(v1: np.ndarray, v2: np.ndarray, dtype: npt.DTypeLike = np.float64, **kwargs) -> np.ndarray:  # noqa
+DEFAULT_DTYPE = np.float64
+
+
+def _nominal_metric(v1: np.ndarray, v2: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE,
+                    **kwargs) -> np.ndarray:  # noqa
     """Metric for nominal data."""
     return (v1 != v2).astype(dtype)
 
 
 def _ordinal_metric(v1: np.ndarray, v2: np.ndarray, i1: np.ndarray, i2: np.ndarray,  # noqa
-                    n_v: np.ndarray, dtype: npt.DTypeLike = np.float64, **kwargs) -> np.ndarray:  # noqa
+                    n_v: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE, **kwargs) -> np.ndarray:  # noqa
     """Metric for ordinal data."""
     i1, i2 = np.minimum(i1, i2), np.maximum(i1, i2)
 
@@ -28,19 +32,20 @@ def _ordinal_metric(v1: np.ndarray, v2: np.ndarray, i1: np.ndarray, i2: np.ndarr
     return (sums_between_indices - np.divide(n_v[i1] + n_v[i2], 2, dtype=dtype)) ** 2
 
 
-def _interval_metric(v1: np.ndarray, v2: np.ndarray, dtype: npt.DTypeLike = np.float64, **kwargs) -> np.ndarray:  # noqa
+def _interval_metric(v1: np.ndarray, v2: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE,
+                     **kwargs) -> np.ndarray:  # noqa
     """Metric for interval data."""
     return (v1 - v2).astype(dtype) ** 2
 
 
-def _ratio_metric(v1: np.ndarray, v2: np.ndarray, dtype: npt.DTypeLike = np.float64, **kwargs) -> np.ndarray:  # noqa
+def _ratio_metric(v1: np.ndarray, v2: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE, **kwargs) -> np.ndarray:  # noqa
     """Metric for ratio data."""
     v1_plus_v2 = v1 + v2
     return np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0,
                      dtype=dtype) ** 2
 
 
-def _coincidences(value_counts: np.ndarray, dtype: npt.DTypeLike = np.float64) -> np.ndarray:
+def _coincidences(value_counts: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE) -> np.ndarray:
     """Coincidence matrix.
 
     Parameters
@@ -64,7 +69,7 @@ def _coincidences(value_counts: np.ndarray, dtype: npt.DTypeLike = np.float64) -
     return np.divide(unnormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype).sum(axis=0)
 
 
-def _random_coincidences(n_v: np.ndarray, dtype: npt.DTypeLike = np.float64) -> np.ndarray:
+def _random_coincidences(n_v: np.ndarray, dtype: npt.DTypeLike = DEFAULT_DTYPE) -> np.ndarray:
     """Random coincidence matrix.
 
     Parameters
@@ -83,7 +88,7 @@ def _random_coincidences(n_v: np.ndarray, dtype: npt.DTypeLike = np.float64) -> 
 
 
 def _distances(value_domain: np.ndarray, distance_metric: Callable[..., np.ndarray], n_v: np.ndarray,
-               dtype: npt.DTypeLike = np.float64) -> np.ndarray:
+               dtype: npt.DTypeLike = DEFAULT_DTYPE) -> np.ndarray:
     """Distances of the different possible values.
 
     Parameters
@@ -158,7 +163,7 @@ def _reliability_data_to_value_counts(reliability_data: np.ndarray, value_domain
 def alpha(reliability_data: Optional[Iterable[Any]] = None, value_counts: Optional[np.ndarray] = None,
           value_domain: Optional[Sequence[Any]] = None,
           level_of_measurement: Union[str, Callable[..., Any]] = "interval",
-          dtype: npt.DTypeLike = np.float64) -> float:
+          dtype: npt.DTypeLike = DEFAULT_DTYPE) -> float:
     """Compute Krippendorff's alpha.
 
     See https://en.wikipedia.org/wiki/Krippendorff%27s_alpha for more information.
