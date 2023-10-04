@@ -6,13 +6,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: 3.x
-    - name: Install the latest Pip and Wheel
-      run: pip install --upgrade pip wheel
     - name: Set up Poetry
       uses: abatilo/actions-poetry@v2
     - name: Build and publish
