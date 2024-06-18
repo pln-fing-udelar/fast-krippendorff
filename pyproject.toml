@@ -28,7 +28,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.9,<3.13"  # Specify an upper limit, otherwise newer NumPy versions can't be installed.
-numpy = "^1.21"  # For NumPy Typing.
+numpy = ">=1.21"  # For NumPy Typing.
 
 [tool.poetry.group.test]
 optional = true

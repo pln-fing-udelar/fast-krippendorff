@@ -13,7 +13,7 @@ from typing import Literal, Protocol, TypeVar, Union
 import numpy as np
 import numpy.typing as npt
 
-DEFAULT_DTYPE = np.float_
+DEFAULT_DTYPE = np.float64
 
 
 ValueScalarType = TypeVar("ValueScalarType", bound=np.generic)
