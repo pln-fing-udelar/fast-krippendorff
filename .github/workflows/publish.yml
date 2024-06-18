@@ -8,11 +8,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.x
     - name: Set up Poetry
-      uses: abatilo/actions-poetry@v2
+      uses: abatilo/actions-poetry@v3
     - name: Build and publish
       env:
         POETRY_HTTP_BASIC_PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
