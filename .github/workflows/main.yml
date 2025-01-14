@@ -21,7 +21,8 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-          enable-cache: true
+          # We don't enable the cache, as it'd otherwise never install a newer version of the dependencies
+          # since we aren't checking in the lock file.
       - name: Install the project
         run: uv sync
       - name: Test
