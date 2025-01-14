@@ -1,14 +1,18 @@
-[tool.poetry]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
 name = "krippendorff"
-version = "0.8.1-dev"
+version = "0.8.1.dev0"
 description = "Fast computation of the Krippendorff's alpha measure."
-authors = ["Santiago Castro <sacastro@fing.edu.uy>"]
+authors = [
+    { name = "Santiago Castro", email = "sacastro@fing.edu.uy" },
+]
 license = "GPL-3.0-or-later"
+license-files = ["LICENSE.txt"]
 
 readme = "README.md"
-
-homepage = "https://github.com/pln-fing-udelar/fast-krippendorff"
-repository = "https://github.com/pln-fing-udelar/fast-krippendorff"
 
 keywords = ["Krippendorff", "alpha", "agreement", "reliability", "coding", "coders", "units", "values"]
 classifiers = [
@@ -27,16 +31,17 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-numpy = ">=1.21"  # For NumPy Typing.
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21", # For NumPy Typing.
+]
 
-[tool.poetry.group.test]
-optional = true
+[dependency-groups]
+dev = ["pytest>=7,<9"]
 
-[tool.poetry.group.test.dependencies]
-pytest = ">=7,<9"
-
-[build-system]
-requires = ["poetry_core"]
-build-backend = "poetry.core.masonry.api"
+[project.urls]
+Homepage = "https://github.com/pln-fing-udelar/fast-krippendorff"
+Documentation = "https://github.com/pln-fing-udelar/fast-krippendorff"
+Repository = "https://github.com/pln-fing-udelar/fast-krippendorff"
+"Bug Tracker" = "https://github.com/pln-fing-udelar/fast-krippendorff/issues"
+Changelog = "https://github.com/pln-fing-udelar/fast-krippendorff/releases"
