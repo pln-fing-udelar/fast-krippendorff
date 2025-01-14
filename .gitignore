@@ -1,7 +1,6 @@
-build
 dist
 
 # codespaces:
 pythonenv3.9
 
-poetry.lock
+uv.lock
