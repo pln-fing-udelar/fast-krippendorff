@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "krippendorff"
-version = "0.8.1"
+version = "0.8.2.dev0"
 description = "Fast computation of the Krippendorff's alpha measure."
 authors = [
     { name = "Santiago Castro", email = "sacastro@fing.edu.uy" },
