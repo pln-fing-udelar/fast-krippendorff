@@ -14,6 +14,10 @@ jobs:
     strategy:
       matrix:
         python-version: [ '3.9', '3.10', '3.11', '3.12', '3.13' ]
+        resolution-strategy: [ 'highest' ]
+        include:
+          - python-version: '3.9'
+            resolution-strategy: 'lowest'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,6 +28,6 @@ jobs:
           # We don't enable the cache, as it'd otherwise never install a newer version of the dependencies
           # since we aren't checking in the lock file.
       - name: Install the project
-        run: uv sync
+        run: uv sync --resolution ${{ matrix.resolution-strategy }}
       - name: Test
         run: uv run pytest --doctest-modules
