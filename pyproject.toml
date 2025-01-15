@@ -33,7 +33,7 @@ classifiers = [
 
 requires-python = ">=3.9"
 dependencies = [
-    "numpy>=1.21", # For NumPy Typing.
+    "numpy>=1.21,<3", # For NumPy Typing.
 ]
 
 [dependency-groups]
