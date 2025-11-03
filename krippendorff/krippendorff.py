@@ -6,9 +6,8 @@ For more information, see: https://en.wikipedia.org/wiki/Krippendorff%27s_alpha
 
 The module naming follows the one from the Wikipedia link.
 """
-from __future__ import annotations
 
-from typing import Literal, Protocol, TypeVar, Union
+from typing import Literal, Protocol, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -21,9 +20,15 @@ MetricResultScalarType = TypeVar("MetricResultScalarType", bound=np.inexact)
 
 
 class DistanceMetric(Protocol):
-    def __call__(self, v1: npt.NDArray[ValueScalarType], v2: npt.NDArray[ValueScalarType], i1: npt.NDArray[np.int_],
-                 i2: npt.NDArray[np.int_], n_v: npt.NDArray[MetricResultScalarType],
-                 dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE) -> npt.NDArray[MetricResultScalarType]:
+    def __call__(
+        self,
+        v1: npt.NDArray[ValueScalarType],
+        v2: npt.NDArray[ValueScalarType],
+        i1: npt.NDArray[np.int_],
+        i2: npt.NDArray[np.int_],
+        n_v: npt.NDArray[MetricResultScalarType],
+        dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+    ) -> npt.NDArray[MetricResultScalarType]:
         """Computes the distance for two arrays element-wise.
 
         Parameters
@@ -54,20 +59,29 @@ class DistanceMetric(Protocol):
         """
 
 
-LevelOfMeasurement = Union[Literal["nominal", "ordinal", "interval", "ratio"], DistanceMetric]
+LevelOfMeasurement = Literal["nominal", "ordinal", "interval", "ratio"] | DistanceMetric
 
 
-def _nominal_metric(v1: npt.NDArray[ValueScalarType], v2: npt.NDArray[ValueScalarType],
-                    i1: npt.NDArray[np.int_], i2: npt.NDArray[np.int_],  # noqa
-                    n_v: npt.NDArray[MetricResultScalarType],  # noqa
-                    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE) -> npt.NDArray[MetricResultScalarType]:
+def _nominal_metric(
+    v1: npt.NDArray[ValueScalarType],
+    v2: npt.NDArray[ValueScalarType],
+    i1: npt.NDArray[np.int_],
+    i2: npt.NDArray[np.int_],
+    n_v: npt.NDArray[MetricResultScalarType],
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+) -> npt.NDArray[MetricResultScalarType]:
     """Metric for nominal data."""
     return (v1 != v2).astype(dtype)
 
 
-def _ordinal_metric(v1: npt.NDArray[ValueScalarType], v2: npt.NDArray[ValueScalarType],  # noqa
-                    i1: npt.NDArray[np.int_], i2: npt.NDArray[np.int_], n_v: npt.NDArray[np.number],
-                    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE) -> npt.NDArray[MetricResultScalarType]:
+def _ordinal_metric(
+    v1: npt.NDArray[ValueScalarType],
+    v2: npt.NDArray[ValueScalarType],
+    i1: npt.NDArray[np.int_],
+    i2: npt.NDArray[np.int_],
+    n_v: npt.NDArray[np.number],
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+) -> npt.NDArray[MetricResultScalarType]:
     """Metric for ordinal data."""
     i1, i2 = np.minimum(i1, i2), np.maximum(i1, i2)
 
@@ -77,24 +91,37 @@ def _ordinal_metric(v1: npt.NDArray[ValueScalarType], v2: npt.NDArray[ValueScala
     return (sums_between_indices - np.divide(n_v[i1] + n_v[i2], 2, dtype=dtype)) ** 2
 
 
-def _interval_metric(v1: npt.NDArray[ValueScalarType], v2: npt.NDArray[ValueScalarType],
-                     i1: npt.NDArray[np.int_], i2: npt.NDArray[np.int_], n_v: npt.NDArray[np.number],  # noqa
-                     dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE) -> npt.NDArray[MetricResultScalarType]:
+def _interval_metric(
+    v1: npt.NDArray[ValueScalarType],
+    v2: npt.NDArray[ValueScalarType],
+    i1: npt.NDArray[np.int_],
+    i2: npt.NDArray[np.int_],
+    n_v: npt.NDArray[np.number],
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+) -> npt.NDArray[MetricResultScalarType]:
     """Metric for interval data."""
     return (v1 - v2).astype(dtype) ** 2
 
 
-def _ratio_metric(v1: npt.NDArray[ValueScalarType], v2: npt.NDArray[ValueScalarType], i1: npt.NDArray[np.int_],  # noqa
-                  i2: npt.NDArray[np.int_], n_v: npt.NDArray[np.number],  # noqa
-                  dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE) -> npt.NDArray[MetricResultScalarType]:
+def _ratio_metric(
+    v1: npt.NDArray[ValueScalarType],
+    v2: npt.NDArray[ValueScalarType],
+    i1: npt.NDArray[np.int_],
+    i2: npt.NDArray[np.int_],
+    n_v: npt.NDArray[np.number],
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+) -> npt.NDArray[MetricResultScalarType]:
     """Metric for ratio data."""
     v1_plus_v2 = v1 + v2
-    return np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0,
-                     dtype=dtype) ** 2
+    return (
+        np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0, dtype=dtype)
+        ** 2
+    )
 
 
-def _coincidences(value_counts: npt.NDArray[np.int_],
-                  dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE) -> npt.NDArray[MetricResultScalarType]:
+def _coincidences(
+    value_counts: npt.NDArray[np.int_], dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE
+) -> npt.NDArray[MetricResultScalarType]:
     """Coincidence matrix.
 
     Parameters
@@ -119,8 +146,8 @@ def _coincidences(value_counts: npt.NDArray[np.int_],
 
 
 def _random_coincidences(
-        n_v: npt.NDArray[MetricResultScalarType],
-        dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE) -> npt.NDArray[MetricResultScalarType]:
+    n_v: npt.NDArray[MetricResultScalarType], dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE
+) -> npt.NDArray[MetricResultScalarType]:
     """Random coincidence matrix.
 
     Parameters
@@ -139,8 +166,12 @@ def _random_coincidences(
     return np.divide(np.outer(n_v, n_v) - np.diagflat(n_v), n_v.sum() - 1, dtype=dtype)
 
 
-def _distances(value_domain: npt.NDArray[ValueScalarType], distance_metric: DistanceMetric, n_v: npt.NDArray[np.int_],
-               dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE) -> npt.NDArray[MetricResultScalarType]:
+def _distances(
+    value_domain: npt.NDArray[ValueScalarType],
+    distance_metric: DistanceMetric,
+    n_v: npt.NDArray[np.int_],
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+) -> npt.NDArray[MetricResultScalarType]:
     """Distances of the different possible values.
 
     Parameters
@@ -164,8 +195,14 @@ def _distances(value_domain: npt.NDArray[ValueScalarType], distance_metric: Dist
         Distance matrix for each value pair.
     """
     indices = np.arange(len(value_domain))
-    return distance_metric(value_domain[:, np.newaxis], value_domain[np.newaxis, :], i1=indices[:, np.newaxis],
-                           i2=indices[np.newaxis, :], n_v=n_v, dtype=dtype)
+    return distance_metric(
+        value_domain[:, np.newaxis],
+        value_domain[np.newaxis, :],
+        i1=indices[:, np.newaxis],
+        i2=indices[np.newaxis, :],
+        n_v=n_v,
+        dtype=dtype,
+    )
 
 
 def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric:
@@ -190,8 +227,9 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
     }.get(level_of_measurement, level_of_measurement)
 
 
-def _reliability_data_to_value_counts(reliability_data: npt.NDArray[ValueScalarType],
-                                      value_domain: npt.NDArray[ValueScalarType]) -> npt.NDArray[np.int_]:
+def _reliability_data_to_value_counts(
+    reliability_data: npt.NDArray[ValueScalarType], value_domain: npt.NDArray[ValueScalarType]
+) -> npt.NDArray[np.int_]:
     """Return the value counts given the reliability data.
 
     Parameters
@@ -210,12 +248,16 @@ def _reliability_data_to_value_counts(reliability_data: npt.NDArray[ValueScalarT
         Number of coders that assigned a certain value to a determined unit, where N is the number of units
         and V is the value count.
     """
-    return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)  # noqa
+    return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)
 
 
-def alpha(reliability_data: npt.ArrayLike | None = None, value_counts: npt.ArrayLike | None = None,
-          value_domain: npt.ArrayLike | None = None, level_of_measurement: LevelOfMeasurement = "interval",
-          dtype: npt.DTypeLike = DEFAULT_DTYPE) -> float:
+def alpha(
+    reliability_data: npt.ArrayLike | None = None,
+    value_counts: npt.ArrayLike | None = None,
+    value_domain: npt.ArrayLike | None = None,
+    level_of_measurement: LevelOfMeasurement = "interval",
+    dtype: npt.DTypeLike = DEFAULT_DTYPE,
+) -> float:
     """Compute Krippendorff's alpha.
 
     See https://en.wikipedia.org/wiki/Krippendorff%27s_alpha for more information.
@@ -324,8 +366,10 @@ def alpha(reliability_data: npt.ArrayLike | None = None, value_counts: npt.Array
         if value_domain is None:
             # Check if Unicode or byte string.
             if kind in {"U", "S"} and level_of_measurement != "nominal":
-                raise ValueError("When using strings, an ordered value_domain is required "
-                                 "for level_of_measurement other than 'nominal'.")
+                raise ValueError(
+                    "When using strings, an ordered value_domain is required"
+                    " for level_of_measurement other than 'nominal'."
+                )
             value_domain = computed_value_domain
         else:
             value_domain = np.asarray(value_domain)

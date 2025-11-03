@@ -1,10 +1,14 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.9.6,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "krippendorff"
+module-root = ""
 
 [project]
 name = "krippendorff"
-version = "0.8.2.dev0"
+version = "0.8.3.dev0"
 description = "Fast computation of the Krippendorff's alpha measure."
 authors = [
     { name = "Santiago Castro", email = "sacastro@fing.edu.uy" },
@@ -22,16 +26,16 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.21,<3", # For NumPy Typing.
 ]
