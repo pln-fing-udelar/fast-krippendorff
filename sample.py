@@ -17,34 +17,42 @@ def main():
 
     reliability_data = [[np.nan if v == "*" else int(v) for v in coder.split()] for coder in reliability_data_str]
 
-    print("Krippendorff's alpha for nominal metric: ", krippendorff.alpha(reliability_data=reliability_data,
-                                                                          level_of_measurement="nominal"))
+    print(
+        "Krippendorff's alpha for nominal metric: ",
+        krippendorff.alpha(reliability_data=reliability_data, level_of_measurement="nominal"),
+    )
     print("Krippendorff's alpha for interval metric: ", krippendorff.alpha(reliability_data=reliability_data))
 
     print()
     print()
     print("From value counts:")
     print()
-    value_counts = np.array([[1, 0, 0, 0],
-                             [0, 0, 0, 0],
-                             [0, 2, 0, 0],
-                             [2, 0, 0, 0],
-                             [0, 0, 2, 0],
-                             [0, 0, 2, 1],
-                             [0, 0, 0, 3],
-                             [1, 0, 1, 0],
-                             [0, 2, 0, 0],
-                             [2, 0, 0, 0],
-                             [2, 0, 0, 0],
-                             [0, 0, 2, 0],
-                             [0, 0, 2, 0],
-                             [0, 0, 0, 0],
-                             [0, 0, 1, 1]])
+    value_counts = np.array(
+        [
+            [1, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 2, 0, 0],
+            [2, 0, 0, 0],
+            [0, 0, 2, 0],
+            [0, 0, 2, 1],
+            [0, 0, 0, 3],
+            [1, 0, 1, 0],
+            [0, 2, 0, 0],
+            [2, 0, 0, 0],
+            [2, 0, 0, 0],
+            [0, 0, 2, 0],
+            [0, 0, 2, 0],
+            [0, 0, 0, 0],
+            [0, 0, 1, 1],
+        ]
+    )
     print(value_counts)
-    print("Krippendorff's alpha for nominal metric: ", krippendorff.alpha(value_counts=value_counts,
-                                                                          level_of_measurement="nominal"))
+    print(
+        "Krippendorff's alpha for nominal metric: ",
+        krippendorff.alpha(value_counts=value_counts, level_of_measurement="nominal"),
+    )
     print("Krippendorff's alpha for interval metric: ", krippendorff.alpha(value_counts=value_counts))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
