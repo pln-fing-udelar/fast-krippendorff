@@ -8,7 +8,7 @@ module-root = ""
 
 [project]
 name = "krippendorff"
-version = "0.8.2.dev0"
+version = "0.8.2"
 description = "Fast computation of the Krippendorff's alpha measure."
 authors = [
     { name = "Santiago Castro", email = "sacastro@fing.edu.uy" },
