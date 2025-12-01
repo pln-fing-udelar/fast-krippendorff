@@ -41,7 +41,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=7,<9"]
+dev = ["pytest>=7,<10"]
 
 [project.urls]
 Homepage = "https://github.com/pln-fing-udelar/fast-krippendorff"
