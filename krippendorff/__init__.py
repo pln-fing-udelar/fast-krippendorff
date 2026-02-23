@@ -1,1 +1,1 @@
-from krippendorff.krippendorff import alpha
+from krippendorff.krippendorff import alpha  # noqa: F401

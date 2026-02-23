@@ -41,7 +41,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=7,<10"]
+dev = [
+    "pytest>=7,<10",
+    "ruff>=0.3,<1",
+    "ty<1",
+]
 
 [project.urls]
 Homepage = "https://github.com/pln-fing-udelar/fast-krippendorff"
@@ -49,3 +53,22 @@ Documentation = "https://github.com/pln-fing-udelar/fast-krippendorff"
 Repository = "https://github.com/pln-fing-udelar/fast-krippendorff"
 "Bug Tracker" = "https://github.com/pln-fing-udelar/fast-krippendorff/issues"
 Changelog = "https://github.com/pln-fing-udelar/fast-krippendorff/releases"
+
+[tool.ruff]
+include = ["krippendorff/**/*.py", "pyproject.toml", "sample.py"]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["B", "C", "C90", "E", "F", "I", "N", "RUF", "UP", "W"]
+
+[tool.ty.src]
+include = ["krippendorff/**/*.py", "sample.py"]
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.coverage.xml]
+output = "test-reports/coverage.xml"
+
+[tool.coverage.html]
+directory = "test-reports/htmlcov"

@@ -27,7 +27,7 @@ class DistanceMetric(Protocol):
         i1: npt.NDArray[np.int_],
         i2: npt.NDArray[np.int_],
         n_v: npt.NDArray[MetricResultScalarType],
-        dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+        dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
     ) -> npt.NDArray[MetricResultScalarType]:
         """Computes the distance for two arrays element-wise.
 
@@ -68,7 +68,7 @@ def _nominal_metric(
     i1: npt.NDArray[np.int_],
     i2: npt.NDArray[np.int_],
     n_v: npt.NDArray[MetricResultScalarType],
-    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Metric for nominal data."""
     return (v1 != v2).astype(dtype)
@@ -80,7 +80,7 @@ def _ordinal_metric(
     i1: npt.NDArray[np.int_],
     i2: npt.NDArray[np.int_],
     n_v: npt.NDArray[np.number],
-    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Metric for ordinal data."""
     i1, i2 = np.minimum(i1, i2), np.maximum(i1, i2)
@@ -97,10 +97,10 @@ def _interval_metric(
     i1: npt.NDArray[np.int_],
     i2: npt.NDArray[np.int_],
     n_v: npt.NDArray[np.number],
-    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Metric for interval data."""
-    return (v1 - v2).astype(dtype) ** 2
+    return (v1 - v2).astype(dtype) ** 2  # ty:ignore[unsupported-operator]
 
 
 def _ratio_metric(
@@ -109,18 +109,19 @@ def _ratio_metric(
     i1: npt.NDArray[np.int_],
     i2: npt.NDArray[np.int_],
     n_v: npt.NDArray[np.number],
-    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Metric for ratio data."""
-    v1_plus_v2 = v1 + v2
+    v1_plus_v2 = v1 + v2  # ty:ignore[unsupported-operator]
     return (
-        np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0, dtype=dtype)
+        np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0, dtype=dtype)  # ty:ignore[unsupported-operator]
         ** 2
     )
 
 
 def _coincidences(
-    value_counts: npt.NDArray[np.int_], dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE
+    value_counts: npt.NDArray[np.int_],
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Coincidence matrix.
 
@@ -138,7 +139,7 @@ def _coincidences(
     o : ndarray, with shape (V, V)
         Coincidence matrix.
     """
-    N, V = value_counts.shape
+    _, V = value_counts.shape  # noqa: N806
     pairable = np.maximum(value_counts.sum(axis=1), 2)
     diagonals = value_counts[:, np.newaxis, :] * np.eye(V)[np.newaxis, ...]
     unnormalized_coincidences = value_counts[..., np.newaxis] * value_counts[:, np.newaxis, :] - diagonals
@@ -146,7 +147,8 @@ def _coincidences(
 
 
 def _random_coincidences(
-    n_v: npt.NDArray[MetricResultScalarType], dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE
+    n_v: npt.NDArray[MetricResultScalarType],
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Random coincidence matrix.
 
@@ -163,14 +165,14 @@ def _random_coincidences(
     e : ndarray, with shape (V, V)
         Random coincidence matrix.
     """
-    return np.divide(np.outer(n_v, n_v) - np.diagflat(n_v), n_v.sum() - 1, dtype=dtype)
+    return np.divide(np.outer(n_v, n_v) - np.diagflat(n_v), n_v.sum() - 1, dtype=dtype)  # ty:ignore[no-matching-overload]
 
 
 def _distances(
     value_domain: npt.NDArray[ValueScalarType],
     distance_metric: DistanceMetric,
     n_v: npt.NDArray[np.int_],
-    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,
+    dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Distances of the different possible values.
 
@@ -200,7 +202,7 @@ def _distances(
         value_domain[np.newaxis, :],
         i1=indices[:, np.newaxis],
         i2=indices[np.newaxis, :],
-        n_v=n_v,
+        n_v=n_v,  # ty:ignore[invalid-argument-type]
         dtype=dtype,
     )
 
@@ -251,7 +253,7 @@ def _reliability_data_to_value_counts(
     return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)
 
 
-def alpha(
+def alpha(  # noqa: C901
     reliability_data: npt.ArrayLike | None = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
