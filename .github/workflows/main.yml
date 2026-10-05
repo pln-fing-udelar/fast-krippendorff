@@ -20,9 +20,9 @@ jobs:
             resolution-strategy: 'lowest'
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
       - name: Install uv and set the python version
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
           # We don't enable the cache, as it'd otherwise never install a newer version of the dependencies
