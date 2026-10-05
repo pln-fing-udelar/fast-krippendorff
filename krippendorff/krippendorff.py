@@ -165,7 +165,7 @@ def _random_coincidences(
     e : ndarray, with shape (V, V)
         Random coincidence matrix.
     """
-    return np.divide(np.outer(n_v, n_v) - np.diagflat(n_v), n_v.sum() - 1, dtype=dtype)  # ty:ignore[no-matching-overload]
+    return np.divide(np.outer(n_v, n_v) - np.diagflat(n_v), n_v.sum() - 1, dtype=dtype)
 
 
 def _distances(
@@ -226,7 +226,7 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
         "ordinal": _ordinal_metric,
         "interval": _interval_metric,
         "ratio": _ratio_metric,
-    }.get(level_of_measurement, level_of_measurement)
+    }.get(level_of_measurement, level_of_measurement)  # ty:ignore[invalid-return-type]
 
 
 def _reliability_data_to_value_counts(
