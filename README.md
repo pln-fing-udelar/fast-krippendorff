@@ -19,7 +19,7 @@ import krippendorff
 krippendorff.alpha(reliability_data=...)
 ```
 
-See `sample.py` and `alpha`'s docstring for more details.
+See `example.py` and `alpha`'s docstring for more details.
 
 ## Installation
 
