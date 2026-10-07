@@ -381,6 +381,10 @@ def _domain_from_raw_values(
     domain_set = set(domain_arr)
     if any(v not in domain_set for v in unique_vals):
         raise ValueError("The reliability data contains out-of-domain values.")
+    if level_of_measurement in ("interval", "ratio") and (
+        np.iscomplexobj(domain_arr) or any(isinstance(v, (complex, np.complexfloating)) for v in domain_arr)
+    ):
+        raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
     return domain_arr
 
 
@@ -578,6 +582,11 @@ def alpha(  # noqa: C901
     dtype = np.dtype(dtype)
     if not np.issubdtype(dtype, np.inexact):
         raise ValueError("`dtype` must be an inexact type.")
+
+    if level_of_measurement in ("interval", "ratio") and (
+        np.iscomplexobj(value_domain) or any(isinstance(v, (complex, np.complexfloating)) for v in value_domain)
+    ):
+        raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
 
     distance_metric = _distance_metric(level_of_measurement)
 
