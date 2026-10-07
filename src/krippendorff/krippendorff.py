@@ -7,7 +7,8 @@ For more information, see: https://en.wikipedia.org/wiki/Krippendorff%27s_alpha
 The module naming follows the one from the Wikipedia link.
 """
 
-from typing import Literal, Protocol, TypeVar
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, Protocol, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -264,6 +265,173 @@ def _reliability_data_to_value_counts(
     return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)
 
 
+def _is_dict_reliability_data(data: Any) -> bool:
+    """Check if the data is structured as dictionary/mapping annotations."""
+    if isinstance(data, Mapping):
+        return True
+    if (
+        isinstance(data, Sequence)
+        and not isinstance(data, (str, bytes))
+        and len(data) > 0
+        and any(isinstance(x, Mapping) for x in data)
+    ):
+        return True
+    return False
+
+
+def _is_missing(val: Any) -> bool:
+    """Check if a value represents a missing annotation."""
+    if val is None:
+        return True
+    if isinstance(val, (float, np.floating)) and np.isnan(val):
+        return True
+    if isinstance(val, (complex, np.complexfloating)) and (np.isnan(val.real) or np.isnan(val.imag)):
+        return True
+    return False
+
+
+def _is_numeric_scalar(val: Any) -> bool:
+    """Check if a value is a real numeric scalar type."""
+    return isinstance(val, (int, float, np.integer, np.floating)) and not isinstance(val, bool)
+
+
+def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
+    """Convert domain values to a 1-D ndarray, preserving object dtype for heterogeneous types."""
+    if isinstance(domain_values, np.ndarray):
+        return domain_values
+    domain_list = (
+        list(domain_values)
+        if hasattr(domain_values, "__iter__") and not isinstance(domain_values, (str, bytes))
+        else list(np.asarray(domain_values))
+    )
+    if all(isinstance(v, str) for v in domain_list):
+        return np.asarray(domain_values)
+    if all(isinstance(v, bytes) for v in domain_list):
+        return np.asarray(domain_values)
+    if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in domain_list):
+        try:
+            as_arr = np.asarray(domain_values)
+            if np.issubdtype(as_arr.dtype, np.integer):
+                return as_arr
+        except Exception:
+            pass
+        arr = np.empty(len(domain_list), dtype=object)
+        for i, v in enumerate(domain_list):
+            arr[i] = v
+        return arr
+    if all(isinstance(v, (float, np.floating)) for v in domain_list):
+        return np.asarray(domain_values)
+    if all(_is_numeric_scalar(v) for v in domain_list):
+        try:
+            as_arr = np.asarray(domain_values)
+            if (
+                as_arr.ndim == 1
+                and len(as_arr) == len(domain_list)
+                and len(set(as_arr.tolist())) == len(set(domain_list))
+                and all(v == arr_v.item() for v, arr_v in zip(domain_list, as_arr, strict=True))
+            ):
+                return as_arr
+        except Exception:
+            pass
+    arr = np.empty(len(domain_list), dtype=object)
+    for i, v in enumerate(domain_list):
+        arr[i] = v
+    return arr
+
+
+def _extract_coder_dicts(
+    data: Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]],
+) -> list[Mapping[Any, Any]]:
+    """Extract and validate coder mapping annotations."""
+    if isinstance(data, Mapping):
+        for coder, coder_dict in data.items():
+            if not isinstance(coder_dict, Mapping):
+                raise ValueError(
+                    f"Expected a mapping of coders to unit annotations, but coder {coder!r} "
+                    f"has non-mapping annotations of type {type(coder_dict).__name__}."
+                )
+        return list(data.values())
+    for i, coder_dict in enumerate(data):
+        if not isinstance(coder_dict, Mapping):
+            raise ValueError(
+                f"Expected a sequence of mappings for coder annotations, but element {i} "
+                f"has non-mapping annotations of type {type(coder_dict).__name__}."
+            )
+    return list(data)
+
+
+def _domain_from_raw_values(
+    distinct_values: Sequence[Any],
+    value_domain: npt.ArrayLike | None,
+    level_of_measurement: LevelOfMeasurement,
+) -> npt.NDArray:
+    """Compute and validate the value domain from extracted mapping values."""
+    unique_vals = list(distinct_values)
+    try:
+        unique_vals = sorted(unique_vals)
+    except TypeError:
+        pass
+
+    all_numeric = all(_is_numeric_scalar(v) for v in unique_vals)
+    all_str = all(isinstance(v, str) for v in unique_vals)
+    all_bytes = all(isinstance(v, bytes) for v in unique_vals)
+    has_mixed_types = not (all_numeric or all_str or all_bytes)
+    computed_domain = _to_domain_array(unique_vals)
+
+    if value_domain is None:
+        if has_mixed_types and level_of_measurement != "nominal":
+            raise ValueError(
+                "When using mixed types, an ordered value_domain is required "
+                "for level_of_measurement other than 'nominal'."
+            )
+        if (
+            len(distinct_values) > 0
+            and isinstance(distinct_values[0], (str, bytes))
+            and level_of_measurement != "nominal"
+        ):
+            raise ValueError(
+                "When using strings, an ordered value_domain is required for level_of_measurement other than 'nominal'."
+            )
+        return computed_domain
+
+    domain_arr = _to_domain_array(value_domain)
+    domain_set = set(domain_arr)
+    if any(v not in domain_set for v in unique_vals):
+        raise ValueError("The reliability data contains out-of-domain values.")
+    if level_of_measurement in ("interval", "ratio") and (
+        np.iscomplexobj(domain_arr) or any(isinstance(v, (complex, np.complexfloating)) for v in domain_arr)
+    ):
+        raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
+    return domain_arr
+
+
+def _dict_reliability_data_to_value_counts(
+    data: Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]],
+    value_domain: npt.ArrayLike | None,
+    level_of_measurement: LevelOfMeasurement,
+) -> tuple[npt.NDArray[np.int_], npt.NDArray]:
+    """Convert dictionary-based reliability data directly into value counts."""
+    coder_dicts = _extract_coder_dicts(data)
+
+    units = list(dict.fromkeys(u for d in coder_dicts for u in d.keys()))
+    distinct_values = list(dict.fromkeys(v for d in coder_dicts for v in d.values() if not _is_missing(v)))
+    domain_arr = _domain_from_raw_values(distinct_values, value_domain, level_of_measurement)
+
+    unit_to_idx = {u: i for i, u in enumerate(units)}
+    val_to_idx = {v: i for i, v in enumerate(domain_arr)}
+
+    value_counts = np.zeros((len(units), len(domain_arr)), dtype=np.int_)
+    for d in coder_dicts:
+        for u, v in d.items():
+            if not _is_missing(v):
+                idx = val_to_idx.get(v)
+                if idx is None:
+                    raise ValueError("The reliability data contains out-of-domain values.")
+                value_counts[unit_to_idx[u], idx] += 1
+
+    return value_counts, domain_arr
+
+
 def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
     """Extract unique non-missing values from reliability data."""
     kind = reliability_data.dtype.kind
@@ -275,7 +443,7 @@ def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
 
 
 def alpha(  # noqa: C901
-    reliability_data: npt.ArrayLike | None = None,
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",
@@ -291,10 +459,15 @@ def alpha(  # noqa: C901
 
     Parameters
     ----------
-    reliability_data : array_like, with shape (M, N)
-        Reliability data matrix which has the rate the i coder gave to the j unit, where M is the number of raters
-        and N is the unit count.
-        Missing rates are represented with `np.nan`.
+    reliability_data : array_like or sequence of dicts or dict of dicts, optional
+        Reliability data containing the ratings assigned by coders to units.
+        Can be:
+        - A 2D array_like of shape (M, N) where M is the number of coders and N is the unit count.
+          Missing rates are represented with `np.nan`.
+        - A sequence of dicts where each dict represents a coder mapping units to values:
+          `[{unit1: val, unit2: val}, {unit1: val, ...}]`.
+        - A dict of dicts where outer keys represent coders and inner dicts map units to values:
+          `{coder1: {unit1: val, ...}, coder2: {unit1: val, ...}}`.
         If it's provided then `value_counts` must not be provided.
 
     value_counts : array_like, with shape (N, V)
@@ -391,6 +564,14 @@ def alpha(  # noqa: C901
     >>> # Note that without an ordered value_domain, we can only calculate nominal distances on strings.
     >>> print(round(alpha(reliability_data, level_of_measurement="nominal"), 3))
     0.743
+    >>> # Sequence of dicts example:
+    >>> data_dicts = [
+    ...     {"u1": 1, "u2": 2, "u3": 3},
+    ...     {"u1": 1, "u2": 2, "u3": 4},
+    ...     {"u2": 2, "u3": 3},
+    ... ]
+    >>> print(round(alpha(reliability_data=data_dicts, level_of_measurement="interval"), 3))
+    0.883
     >>> # Subsample alpha calculation using all_reliability_data:
     >>> subsample = [row[:6] for row in reliability_data]
     >>> print(round(alpha(subsample, level_of_measurement="ordinal",
@@ -417,39 +598,48 @@ def alpha(  # noqa: C901
             raise ValueError("The all_reliability_data must be a 2D array.")
 
     if reliability_data is not None:
-        rel_arr = np.asarray(reliability_data)
-        computed_value_domain = _domain_from_reliability_data(rel_arr)
-
-        if all_reliability_data is not None:
-            all_computed_domain = _domain_from_reliability_data(all_rel_arr)
-            combined_computed_domain = np.unique(np.concatenate([computed_value_domain, all_computed_domain]))
+        if _is_dict_reliability_data(reliability_data):
+            if all_reliability_data is not None:
+                raise ValueError("Subsample with dict reliability_data is not supported.")
+            value_counts, value_domain = _dict_reliability_data_to_value_counts(
+                reliability_data,  # ty:ignore[invalid-argument-type]
+                value_domain,
+                level_of_measurement,
+            )
         else:
-            combined_computed_domain = computed_value_domain
+            rel_arr = np.asarray(reliability_data)
+            computed_value_domain = _domain_from_reliability_data(rel_arr)
 
-        if value_domain is None:
-            kind = rel_arr.dtype.kind
-            all_kind = all_rel_arr.dtype.kind if all_reliability_data is not None else None
-            if (kind in {"U", "S"} or all_kind in {"U", "S"}) and level_of_measurement != "nominal":
-                raise ValueError(
-                    "When using strings, an ordered value_domain is required"
-                    " for level_of_measurement other than 'nominal'."
-                )
-            value_domain = combined_computed_domain
-        else:
-            value_domain = np.asarray(value_domain)
-            if not np.isin(computed_value_domain, value_domain).all():
-                raise ValueError("The reliability data contains out-of-domain values.")
-            if all_reliability_data is not None and not np.isin(all_computed_domain, value_domain).all():
-                raise ValueError("The reference reliability data contains out-of-domain values.")
+            if all_reliability_data is not None:
+                all_computed_domain = _domain_from_reliability_data(all_rel_arr)
+                combined_computed_domain = np.unique(np.concatenate([computed_value_domain, all_computed_domain]))
+            else:
+                combined_computed_domain = computed_value_domain
 
-        value_counts = _reliability_data_to_value_counts(rel_arr, value_domain)
+            if value_domain is None:
+                kind = rel_arr.dtype.kind
+                all_kind = all_rel_arr.dtype.kind if all_reliability_data is not None else None
+                if (kind in {"U", "S"} or all_kind in {"U", "S"}) and level_of_measurement != "nominal":
+                    raise ValueError(
+                        "When using strings, an ordered value_domain is required"
+                        " for level_of_measurement other than 'nominal'."
+                    )
+                value_domain = combined_computed_domain
+            else:
+                value_domain = _to_domain_array(value_domain)
+                if not np.isin(computed_value_domain, value_domain).all():
+                    raise ValueError("The reliability data contains out-of-domain values.")
+                if all_reliability_data is not None and not np.isin(all_computed_domain, value_domain).all():
+                    raise ValueError("The reference reliability data contains out-of-domain values.")
+
+            value_counts = _reliability_data_to_value_counts(rel_arr, value_domain)
     else:
         value_counts = np.asarray(value_counts)
 
         if value_domain is None:
             value_domain = np.arange(value_counts.shape[1])
         else:
-            value_domain = np.asarray(value_domain)
+            value_domain = _to_domain_array(value_domain)
 
         if value_counts.shape[1] != len(value_domain):
             raise ValueError("The value domain should be equal to the number of columns of value_counts.")
@@ -463,6 +653,11 @@ def alpha(  # noqa: C901
     dtype = np.dtype(dtype)
     if not np.issubdtype(dtype, np.inexact):
         raise ValueError("`dtype` must be an inexact type.")
+
+    if level_of_measurement in ("interval", "ratio") and (
+        np.iscomplexobj(value_domain) or any(isinstance(v, (complex, np.complexfloating)) for v in value_domain)
+    ):
+        raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
 
     distance_metric = _distance_metric(level_of_measurement)
 
