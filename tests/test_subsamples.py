@@ -276,12 +276,12 @@ def test_subsample_invalid_random_coincidences() -> None:
         krippendorff.alpha(data, random_coincidences=[[0, 0], [0, 0]])
 
 
-def test_subsample_zero_disagreement_equal_total() -> None:
+def test_subsample_zero_expected_disagreement_constant_data() -> None:
     # Sample and reference both only use category 0 in domain [0, 1]
-    # o_sum == e_sum and Do == 0, De == 0 -> should return 1.0, not NaN
+    # No variation in data -> De == 0 -> alpha is undefined
     data = np.array([[0, 0], [0, 0]])
-    res = krippendorff.alpha(data, value_domain=[0, 1], level_of_measurement="nominal")
-    assert res == 1.0
+    with pytest.raises(ValueError, match="Expected disagreement is zero, making Krippendorff's alpha undefined"):
+        krippendorff.alpha(data, value_domain=[0, 1], level_of_measurement="nominal")
 
 
 def test_subsample_asymmetric_random_coincidences() -> None:

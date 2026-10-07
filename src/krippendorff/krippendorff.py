@@ -525,7 +525,5 @@ def alpha(  # noqa: C901
     do = (o * d).sum() / o.sum()
     de = (e * d).sum() / e.sum()
     if de == 0:
-        if do == 0:
-            return 1.0
         raise ValueError("Expected disagreement is zero, making Krippendorff's alpha undefined.")
     return 1 - do / de
