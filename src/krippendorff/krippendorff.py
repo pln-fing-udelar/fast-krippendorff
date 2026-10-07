@@ -149,11 +149,13 @@ def _coincidences(
     o : ndarray, with shape (V, V)
         Coincidence matrix.
     """
-    _, V = value_counts.shape  # noqa: N806
     pairable = np.maximum(value_counts.sum(axis=1), 2)
-    diagonals = value_counts[:, np.newaxis, :] * np.eye(V)[np.newaxis, ...]
-    unnormalized_coincidences = value_counts[..., np.newaxis] * value_counts[:, np.newaxis, :] - diagonals
-    return np.divide(unnormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype).sum(axis=0)
+    weights = np.divide(value_counts, (pairable - 1)[:, np.newaxis], dtype=dtype)
+    value_counts_float = value_counts.astype(dtype, copy=False)
+    coincidences = np.dot(value_counts_float.T, weights)
+    diagonal = np.sum((value_counts_float - 1) * weights, axis=0, dtype=dtype)
+    np.fill_diagonal(coincidences, diagonal)
+    return coincidences
 
 
 def _random_coincidences(
@@ -430,12 +432,26 @@ def _dict_reliability_data_to_value_counts(
     return value_counts, domain_arr
 
 
+def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
+    """Extract unique non-missing values from reliability data."""
+    kind = reliability_data.dtype.kind
+    if kind in {"i", "u", "f"}:
+        return np.unique(reliability_data[~np.isnan(reliability_data)])
+    elif kind in {"U", "S"}:
+        return np.unique(reliability_data[reliability_data != "nan"])
+    raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
+
+
 def alpha(  # noqa: C901
     reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",
     dtype: npt.DTypeLike = DEFAULT_DTYPE,
+    *,
+    all_reliability_data: npt.ArrayLike | None = None,
+    all_value_counts: npt.ArrayLike | None = None,
+    random_coincidences: npt.ArrayLike | None = None,
 ) -> float:
     """Compute Krippendorff's alpha.
 
@@ -471,6 +487,25 @@ def alpha(  # noqa: C901
 
     dtype : data-type
         Result and computation data-type.
+
+    all_reliability_data : array_like, with shape (M, N_all), optional
+        Reference reliability data matrix representing the full population or reference dataset,
+        used to compute expected random coincidences (and distances for ordinal measurement)
+        when computing alpha for subsamples.
+        At most one of `all_reliability_data`, `all_value_counts`, or `random_coincidences` can be provided.
+
+    all_value_counts : array_like, with shape (N_all, V), optional
+        Reference value counts representing the full population or reference dataset,
+        used to compute expected random coincidences (and distances for ordinal measurement)
+        when computing alpha for subsamples.
+        At most one of `all_reliability_data`, `all_value_counts`, or `random_coincidences` can be provided.
+
+    random_coincidences : array_like, with shape (V, V), optional
+        Precomputed random coincidences matrix representing expected chance agreement.
+        It must be symmetric, non-negative, finite, and have a positive sum.
+        Note that if a custom distance metric callable depends on unnormalized pairable counts
+        `n_v`, `random_coincidences` should provide unnormalized counts rather than proportions.
+        At most one of `all_reliability_data`, `all_value_counts`, or `random_coincidences` can be provided.
 
     Returns
     -------
@@ -537,47 +572,67 @@ def alpha(  # noqa: C901
     ... ]
     >>> print(round(alpha(reliability_data=data_dicts, level_of_measurement="interval"), 3))
     0.883
+    >>> # Subsample alpha calculation using all_reliability_data:
+    >>> subsample = [row[:6] for row in reliability_data]
+    >>> print(round(alpha(subsample, level_of_measurement="ordinal",
+    ...                   value_domain=["very low", "low", "mid", "high", "very high"],
+    ...                   all_reliability_data=reliability_data), 3))
+    0.72
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
 
-    # Don't know if it's a `list` or NumPy array. If it's the latter, the truth value is ambiguous. So, ask for `None`.
-    if value_counts is None:
+    subsample_params = [
+        all_reliability_data is not None,
+        all_value_counts is not None,
+        random_coincidences is not None,
+    ]
+    if sum(subsample_params) > 1:
+        raise ValueError(
+            "At most one of all_reliability_data, all_value_counts, or random_coincidences can be provided."
+        )
+
+    if all_reliability_data is not None:
+        all_rel_arr = np.asarray(all_reliability_data)
+        if all_rel_arr.ndim != 2:
+            raise ValueError("The all_reliability_data must be a 2D array.")
+
+    if reliability_data is not None:
         if _is_dict_reliability_data(reliability_data):
+            if all_reliability_data is not None:
+                raise ValueError("Subsample with dict reliability_data is not supported.")
             value_counts, value_domain = _dict_reliability_data_to_value_counts(
                 reliability_data,  # ty:ignore[invalid-argument-type]
                 value_domain,
                 level_of_measurement,
             )
         else:
-            reliability_data = np.asarray(reliability_data)
+            rel_arr = np.asarray(reliability_data)
+            computed_value_domain = _domain_from_reliability_data(rel_arr)
 
-            kind = reliability_data.dtype.kind
-            if kind in {"i", "u", "f"}:
-                # `np.isnan` only operates on signed integers, unsigned integers, and floats, not strings.
-                computed_value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
-            elif kind in {"U", "S"}:  # Unicode or byte string.
-                # `np.asarray` will coerce `np.nan` values to "nan".
-                computed_value_domain = np.unique(reliability_data[reliability_data != "nan"])
+            if all_reliability_data is not None:
+                all_computed_domain = _domain_from_reliability_data(all_rel_arr)
+                combined_computed_domain = np.unique(np.concatenate([computed_value_domain, all_computed_domain]))
             else:
-                raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
+                combined_computed_domain = computed_value_domain
 
             if value_domain is None:
-                # Check if Unicode or byte string.
-                if kind in {"U", "S"} and level_of_measurement != "nominal":
+                kind = rel_arr.dtype.kind
+                all_kind = all_rel_arr.dtype.kind if all_reliability_data is not None else None
+                if (kind in {"U", "S"} or all_kind in {"U", "S"}) and level_of_measurement != "nominal":
                     raise ValueError(
                         "When using strings, an ordered value_domain is required"
                         " for level_of_measurement other than 'nominal'."
                     )
-                value_domain = computed_value_domain
+                value_domain = combined_computed_domain
             else:
                 value_domain = _to_domain_array(value_domain)
-                # Note: We do not need to test for `np.nan` in the input data.
-                # `np.nan` indicates the absence of a domain value and is always allowed.
                 if not np.isin(computed_value_domain, value_domain).all():
                     raise ValueError("The reliability data contains out-of-domain values.")
+                if all_reliability_data is not None and not np.isin(all_computed_domain, value_domain).all():
+                    raise ValueError("The reference reliability data contains out-of-domain values.")
 
-            value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
+            value_counts = _reliability_data_to_value_counts(rel_arr, value_domain)
     else:
         value_counts = np.asarray(value_counts)
 
@@ -585,8 +640,9 @@ def alpha(  # noqa: C901
             value_domain = np.arange(value_counts.shape[1])
         else:
             value_domain = _to_domain_array(value_domain)
-            if value_counts.shape[1] != len(value_domain):
-                raise ValueError("The value domain should be equal to the number of columns of value_counts.")
+
+        if value_counts.shape[1] != len(value_domain):
+            raise ValueError("The value domain should be equal to the number of columns of value_counts.")
 
     if len(value_domain) <= 1:
         raise ValueError("There has to be more than one value in the domain.")
@@ -607,6 +663,64 @@ def alpha(  # noqa: C901
 
     o = _coincidences(value_counts, dtype=dtype)
     n_v = o.sum(axis=0)
-    e = _random_coincidences(n_v, dtype=dtype)
-    d = _distances(value_domain, distance_metric, n_v, dtype=dtype)
-    return 1 - (o * d).sum() / (e * d).sum()
+
+    if all_reliability_data is not None:
+        all_rel = all_rel_arr
+        all_computed_domain = _domain_from_reliability_data(all_rel)
+        if not np.isin(all_computed_domain, value_domain).all():
+            raise ValueError("The reference reliability data contains out-of-domain values.")
+        all_counts = _reliability_data_to_value_counts(all_rel, value_domain)
+        if (all_counts.sum(axis=-1) <= 1).all():
+            raise ValueError(
+                "There has to be at least one unit in all_reliability_data with values assigned by at least two coders."
+            )
+        all_o = _coincidences(all_counts, dtype=dtype)
+        all_n_v = all_o.sum(axis=0)
+        e = _random_coincidences(all_n_v, dtype=dtype)
+        dist_n_v = all_n_v
+    elif all_value_counts is not None:
+        all_counts = np.asarray(all_value_counts)
+        if all_counts.ndim != 2:
+            raise ValueError("The all_value_counts must be a 2D array.")
+        if all_counts.shape[1] != len(value_domain):
+            raise ValueError("The number of columns of all_value_counts should be equal to the value domain length.")
+        if (
+            (
+                not np.issubdtype(all_counts.dtype, np.integer)
+                and not (np.issubdtype(all_counts.dtype, np.floating) and (all_counts % 1 == 0).all())
+            )
+            or not np.isfinite(all_counts).all()
+            or (all_counts < 0).any()
+        ):
+            raise ValueError("The all_value_counts must contain finite, non-negative integer counts.")
+        all_counts = all_counts.astype(np.int_, copy=False)
+        if (all_counts.sum(axis=-1) <= 1).all():
+            raise ValueError(
+                "There has to be at least one unit in all_value_counts with values assigned by at least two coders."
+            )
+        all_o = _coincidences(all_counts, dtype=dtype)
+        all_n_v = all_o.sum(axis=0)
+        e = _random_coincidences(all_n_v, dtype=dtype)
+        dist_n_v = all_n_v
+    elif random_coincidences is not None:
+        e = np.asarray(random_coincidences, dtype=dtype)
+        if e.shape != (len(value_domain), len(value_domain)):
+            raise ValueError(
+                f"The random_coincidences shape {e.shape} must be equal to {(len(value_domain), len(value_domain))}."
+            )
+        if not np.isfinite(e).all() or (e < 0).any() or e.sum() <= 0:
+            raise ValueError("The random_coincidences matrix must be non-negative, finite, and have a positive sum.")
+        if not np.allclose(e, e.T):
+            raise ValueError("The random_coincidences matrix must be symmetric.")
+        dist_n_v = e.sum(axis=0)
+    else:
+        e = _random_coincidences(n_v, dtype=dtype)
+        dist_n_v = n_v
+
+    d = _distances(value_domain, distance_metric, dist_n_v, dtype=dtype)
+
+    do = (o * d).sum() / o.sum()
+    de = (e * d).sum() / e.sum()
+    if de == 0:
+        raise ValueError("Expected disagreement is zero, making Krippendorff's alpha undefined.")
+    return 1 - do / de
