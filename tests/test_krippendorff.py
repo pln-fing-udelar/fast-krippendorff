@@ -91,7 +91,7 @@ def test_string_labels_nominal() -> None:
     ]
     res = alpha(data, level_of_measurement="nominal")
     assert isinstance(res, float)
-    assert 0.0 < res < 1.0
+    assert round(res, 6) == 0.722222
 
 
 def test_string_labels_ordinal_with_domain() -> None:
@@ -123,7 +123,7 @@ def test_custom_distance_metric() -> None:
     ]
     res = alpha(data, level_of_measurement=absolute_distance)
     assert isinstance(res, float)
-    assert 0.0 < res < 1.0
+    assert round(res, 6) == 0.761905
 
 
 def test_perfect_agreement() -> None:
