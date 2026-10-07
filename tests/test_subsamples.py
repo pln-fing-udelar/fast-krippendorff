@@ -228,17 +228,30 @@ def test_subsample_zero_expected_and_observed_disagreement() -> None:
 
 
 def test_subsample_zero_expected_nonzero_observed() -> None:
-    # If expected disagreement is 0 but observed is not, alpha is 0.0
-    # Custom distance metric that returns 0 for expected coincidences
+    # If expected disagreement is 0 but observed is nonzero, alpha is undefined -> raises ValueError
     e = np.array([[1.0, 0.0], [0.0, 1.0]])  # only diagonal coincidences
     sub_data = np.array([[0, 1], [1, 0]])  # complete disagreement
-    res = krippendorff.alpha(
-        reliability_data=sub_data,
-        value_domain=[0, 1],
-        random_coincidences=e,
-        level_of_measurement="nominal",
-    )
-    assert res == 0.0
+    with pytest.raises(ValueError, match="Expected disagreement is zero, making Krippendorff's alpha undefined"):
+        krippendorff.alpha(
+            reliability_data=sub_data,
+            value_domain=[0, 1],
+            random_coincidences=e,
+            level_of_measurement="nominal",
+        )
+
+
+def test_subsample_invalid_all_value_counts() -> None:
+    # 1D array
+    with pytest.raises(ValueError, match="must be a 2D array"):
+        krippendorff.alpha(value_counts=[[1, 1], [1, 1]], all_value_counts=[1, 1])
+
+    # NaN in counts
+    with pytest.raises(ValueError, match="finite, non-negative integer counts"):
+        krippendorff.alpha(value_counts=[[1, 1], [1, 1]], all_value_counts=[[np.nan, 1], [1, 1]])
+
+    # Negative counts
+    with pytest.raises(ValueError, match="finite, non-negative integer counts"):
+        krippendorff.alpha(value_counts=[[1, 1], [1, 1]], all_value_counts=[[-1, 2], [1, 1]])
 
 
 def test_subsample_out_of_domain_reference_with_value_counts() -> None:

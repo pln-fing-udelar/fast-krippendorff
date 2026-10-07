@@ -438,10 +438,7 @@ def alpha(  # noqa: C901
         value_counts = np.asarray(value_counts)
 
         if value_domain is None:
-            if all_value_counts is not None:
-                value_domain = np.arange(np.asarray(all_value_counts).shape[1])
-            else:
-                value_domain = np.arange(value_counts.shape[1])
+            value_domain = np.arange(value_counts.shape[1])
         else:
             value_domain = np.asarray(value_domain)
 
@@ -479,8 +476,20 @@ def alpha(  # noqa: C901
         dist_n_v = all_n_v
     elif all_value_counts is not None:
         all_counts = np.asarray(all_value_counts)
+        if all_counts.ndim != 2:
+            raise ValueError("The all_value_counts must be a 2D array.")
         if all_counts.shape[1] != len(value_domain):
-            raise ValueError("The value domain should be equal to the number of columns of all_value_counts.")
+            raise ValueError("The number of columns of all_value_counts should be equal to the value domain length.")
+        if (
+            (
+                not np.issubdtype(all_counts.dtype, np.integer)
+                and not (np.issubdtype(all_counts.dtype, np.floating) and (all_counts % 1 == 0).all())
+            )
+            or not np.isfinite(all_counts).all()
+            or (all_counts < 0).any()
+        ):
+            raise ValueError("The all_value_counts must contain finite, non-negative integer counts.")
+        all_counts = all_counts.astype(np.int_, copy=False)
         if (all_counts.sum(axis=-1) <= 1).all():
             raise ValueError(
                 "There has to be at least one unit in all_value_counts with values assigned by at least two coders."
@@ -507,5 +516,7 @@ def alpha(  # noqa: C901
     do = (o * d).sum() / o.sum()
     de = (e * d).sum() / e.sum()
     if de == 0:
-        return 1.0 if do == 0 else 0.0
+        if do == 0:
+            return 1.0
+        raise ValueError("Expected disagreement is zero, making Krippendorff's alpha undefined.")
     return 1 - do / de
