@@ -286,35 +286,71 @@ def _is_missing(val: Any) -> bool:
     return False
 
 
-def _dict_reliability_data_to_value_counts(
-    data: Mapping[Any, Any] | Sequence[Mapping[Any, Any]],
+def _extract_coder_dicts(
+    data: Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]],
+) -> list[Mapping[Any, Any]]:
+    """Extract and validate coder mapping annotations."""
+    if isinstance(data, Mapping):
+        for coder, coder_dict in data.items():
+            if not isinstance(coder_dict, Mapping):
+                raise ValueError(
+                    f"Expected a mapping of coders to unit annotations, but coder {coder!r} "
+                    f"has non-mapping annotations of type {type(coder_dict).__name__}."
+                )
+        return list(data.values())
+    for i, coder_dict in enumerate(data):
+        if not isinstance(coder_dict, Mapping):
+            raise ValueError(
+                f"Expected a sequence of mappings for coder annotations, but element {i} "
+                f"has non-mapping annotations of type {type(coder_dict).__name__}."
+            )
+    return list(data)
+
+
+def _domain_from_raw_values(
+    raw_values: list[Any],
     value_domain: npt.ArrayLike | None,
     level_of_measurement: LevelOfMeasurement,
-) -> tuple[npt.NDArray[np.int_], npt.NDArray]:
-    """Convert dictionary-based reliability data directly into value counts."""
-    if isinstance(data, Mapping):
-        coder_dicts = list(data.values())
-    else:
-        coder_dicts = list(data)
-
-    units = list(dict.fromkeys(u for d in coder_dicts for u in d.keys()))
-    raw_values = [v for d in coder_dicts for v in d.values() if not _is_missing(v)]
-
+) -> npt.NDArray:
+    """Compute and validate the value domain from extracted mapping values."""
+    unique_vals = list(dict.fromkeys(raw_values))
     try:
-        computed_value_domain = np.unique(raw_values)
+        unique_vals = sorted(unique_vals)
     except TypeError:
-        computed_value_domain = np.array(list(dict.fromkeys(raw_values)))
+        pass
+
+    has_mixed_types = len({type(v) for v in unique_vals}) > 1
+    computed_domain = np.array(unique_vals, dtype=object) if has_mixed_types else np.asarray(unique_vals)
 
     if value_domain is None:
+        if has_mixed_types and level_of_measurement != "nominal":
+            raise ValueError(
+                "When using mixed types, an ordered value_domain is required "
+                "for level_of_measurement other than 'nominal'."
+            )
         if len(raw_values) > 0 and isinstance(raw_values[0], (str, bytes)) and level_of_measurement != "nominal":
             raise ValueError(
                 "When using strings, an ordered value_domain is required for level_of_measurement other than 'nominal'."
             )
-        domain_arr = computed_value_domain
-    else:
-        domain_arr = np.asarray(value_domain)
-        if not np.isin(computed_value_domain, domain_arr).all():
-            raise ValueError("The reliability data contains out-of-domain values.")
+        return computed_domain
+
+    domain_arr = np.asarray(value_domain)
+    if not np.isin(computed_domain, domain_arr).all():
+        raise ValueError("The reliability data contains out-of-domain values.")
+    return domain_arr
+
+
+def _dict_reliability_data_to_value_counts(
+    data: Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]],
+    value_domain: npt.ArrayLike | None,
+    level_of_measurement: LevelOfMeasurement,
+) -> tuple[npt.NDArray[np.int_], npt.NDArray]:
+    """Convert dictionary-based reliability data directly into value counts."""
+    coder_dicts = _extract_coder_dicts(data)
+
+    units = list(dict.fromkeys(u for d in coder_dicts for u in d.keys()))
+    raw_values = [v for d in coder_dicts for v in d.values() if not _is_missing(v)]
+    domain_arr = _domain_from_raw_values(raw_values, value_domain, level_of_measurement)
 
     unit_to_idx = {u: i for i, u in enumerate(units)}
     val_to_idx = {v: i for i, v in enumerate(domain_arr)}
@@ -331,7 +367,7 @@ def _dict_reliability_data_to_value_counts(
 
 
 def alpha(  # noqa: C901
-    reliability_data: npt.ArrayLike | Mapping[Any, Any] | Sequence[Mapping[Any, Any]] | None = None,
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",

@@ -158,3 +158,18 @@ def test_dict_input_literal_nan_string() -> None:
     ]
     res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
     assert np.isclose(res, 1.0)
+
+
+def test_dict_input_mixed_nominal_labels() -> None:
+    data = [
+        {"u1": 1, "u2": "a"},
+        {"u1": 1, "u2": "a"},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+
+def test_dict_input_malformed_flat_dict() -> None:
+    flat_data = {"u1": 1, "u2": 2}
+    with pytest.raises(ValueError, match="Expected a mapping of coders to unit annotations"):
+        krippendorff.alpha(reliability_data=flat_data, level_of_measurement="nominal")  # ty:ignore[invalid-argument-type]
