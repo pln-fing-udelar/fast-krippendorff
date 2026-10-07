@@ -327,6 +327,9 @@ def alpha(  # noqa: C901
 
     random_coincidences : array_like, with shape (V, V), optional
         Precomputed random coincidences matrix representing expected chance agreement.
+        It must be symmetric, non-negative, finite, and have a positive sum.
+        Note that if a custom distance metric callable depends on unnormalized pairable counts
+        `n_v`, `random_coincidences` should provide unnormalized counts rather than proportions.
         At most one of `all_reliability_data`, `all_value_counts`, or `random_coincidences` can be provided.
 
     Returns
@@ -506,6 +509,8 @@ def alpha(  # noqa: C901
             )
         if not np.isfinite(e).all() or (e < 0).any() or e.sum() <= 0:
             raise ValueError("The random_coincidences matrix must be non-negative, finite, and have a positive sum.")
+        if not np.allclose(e, e.T):
+            raise ValueError("The random_coincidences matrix must be symmetric.")
         dist_n_v = e.sum(axis=0)
     else:
         e = _random_coincidences(n_v, dtype=dtype)

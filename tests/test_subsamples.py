@@ -282,3 +282,9 @@ def test_subsample_zero_disagreement_equal_total() -> None:
     data = np.array([[0, 0], [0, 0]])
     res = krippendorff.alpha(data, value_domain=[0, 1], level_of_measurement="nominal")
     assert res == 1.0
+
+
+def test_subsample_asymmetric_random_coincidences() -> None:
+    data = np.array([[1, 2], [1, 2]])
+    with pytest.raises(ValueError, match="must be symmetric"):
+        krippendorff.alpha(data, random_coincidences=[[1.0, 2.0], [0.0, 1.0]])
