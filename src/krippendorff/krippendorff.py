@@ -409,12 +409,16 @@ def alpha(  # noqa: C901
             "At most one of all_reliability_data, all_value_counts, or random_coincidences can be provided."
         )
 
+    if all_reliability_data is not None:
+        all_rel_arr = np.asarray(all_reliability_data)
+        if all_rel_arr.ndim != 2:
+            raise ValueError("The all_reliability_data must be a 2D array.")
+
     if reliability_data is not None:
         rel_arr = np.asarray(reliability_data)
         computed_value_domain = _domain_from_reliability_data(rel_arr)
 
         if all_reliability_data is not None:
-            all_rel_arr = np.asarray(all_reliability_data)
             all_computed_domain = _domain_from_reliability_data(all_rel_arr)
             combined_computed_domain = np.unique(np.concatenate([computed_value_domain, all_computed_domain]))
         else:
@@ -422,7 +426,7 @@ def alpha(  # noqa: C901
 
         if value_domain is None:
             kind = rel_arr.dtype.kind
-            all_kind = np.asarray(all_reliability_data).dtype.kind if all_reliability_data is not None else None
+            all_kind = all_rel_arr.dtype.kind if all_reliability_data is not None else None
             if (kind in {"U", "S"} or all_kind in {"U", "S"}) and level_of_measurement != "nominal":
                 raise ValueError(
                     "When using strings, an ordered value_domain is required"
@@ -464,7 +468,7 @@ def alpha(  # noqa: C901
     n_v = o.sum(axis=0)
 
     if all_reliability_data is not None:
-        all_rel = np.asarray(all_reliability_data)
+        all_rel = all_rel_arr
         all_computed_domain = _domain_from_reliability_data(all_rel)
         if not np.isin(all_computed_domain, value_domain).all():
             raise ValueError("The reference reliability data contains out-of-domain values.")

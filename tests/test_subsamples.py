@@ -288,3 +288,12 @@ def test_subsample_asymmetric_random_coincidences() -> None:
     data = np.array([[1, 2], [1, 2]])
     with pytest.raises(ValueError, match="must be symmetric"):
         krippendorff.alpha(data, random_coincidences=[[1.0, 2.0], [0.0, 1.0]])
+
+
+def test_subsample_1d_all_reliability_data() -> None:
+    data = np.array([[1, 2], [1, 2]])
+    with pytest.raises(ValueError, match="all_reliability_data must be a 2D array"):
+        krippendorff.alpha(data, all_reliability_data=[1, 2, 3])
+
+    with pytest.raises(ValueError, match="all_reliability_data must be a 2D array"):
+        krippendorff.alpha(value_counts=[[2, 0], [0, 2]], all_reliability_data=[1, 2, 3])
