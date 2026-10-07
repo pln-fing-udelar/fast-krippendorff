@@ -234,3 +234,30 @@ def test_value_counts_tuple_value_domain() -> None:
     vc = np.array([[2, 0], [0, 2]])
     res = krippendorff.alpha(value_counts=vc, value_domain=[(1, 2), (3, 4)], level_of_measurement="nominal")
     assert np.isclose(res, 1.0)
+
+
+def test_dict_input_complex_labels_nominal() -> None:
+    data = [
+        {"u1": 1 + 2j, "u2": 3 + 4j},
+        {"u1": 1 + 2j, "u2": 3 + 4j},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+
+def test_dict_input_complex_labels_interval_rejected() -> None:
+    data = [
+        {"u1": 1 + 2j, "u2": 3 + 4j},
+        {"u1": 1 + 2j, "u2": 3 + 4j},
+    ]
+    with pytest.raises(ValueError, match="ordered value_domain is required"):
+        krippendorff.alpha(reliability_data=data, level_of_measurement="interval")
+
+
+def test_dict_input_numpy_complex_labels_interval_rejected() -> None:
+    data = [
+        {"u1": np.complex128(1 + 2j), "u2": np.complex128(3 + 4j)},
+        {"u1": np.complex128(1 + 2j), "u2": np.complex128(3 + 4j)},
+    ]
+    with pytest.raises(ValueError, match="ordered value_domain is required"):
+        krippendorff.alpha(reliability_data=data, level_of_measurement="interval")

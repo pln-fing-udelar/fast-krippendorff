@@ -287,8 +287,8 @@ def _is_missing(val: Any) -> bool:
 
 
 def _is_numeric_scalar(val: Any) -> bool:
-    """Check if a value is a numeric scalar type."""
-    return isinstance(val, (int, float, np.number)) and not isinstance(val, bool)
+    """Check if a value is a real numeric scalar type."""
+    return isinstance(val, (int, float, np.integer, np.floating)) and not isinstance(val, bool)
 
 
 def _to_domain_array(domain_values: Any) -> npt.NDArray:
