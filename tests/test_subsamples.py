@@ -239,3 +239,33 @@ def test_subsample_zero_expected_nonzero_observed() -> None:
         level_of_measurement="nominal",
     )
     assert res == 0.0
+
+
+def test_subsample_out_of_domain_reference_with_value_counts() -> None:
+    with pytest.raises(ValueError, match="reference reliability data contains out-of-domain values"):
+        krippendorff.alpha(
+            value_counts=[[2, 0], [0, 2]],
+            value_domain=[1, 2],
+            all_reliability_data=[[1, 3], [1, 3]],
+        )
+
+
+def test_subsample_invalid_random_coincidences() -> None:
+    data = np.array([[1, 2], [1, 2]])
+
+    with pytest.raises(ValueError, match="non-negative, finite, and have a positive sum"):
+        krippendorff.alpha(data, random_coincidences=[[np.nan, 0], [0, 1]])
+
+    with pytest.raises(ValueError, match="non-negative, finite, and have a positive sum"):
+        krippendorff.alpha(data, random_coincidences=[[-1, 2], [2, 1]])
+
+    with pytest.raises(ValueError, match="non-negative, finite, and have a positive sum"):
+        krippendorff.alpha(data, random_coincidences=[[0, 0], [0, 0]])
+
+
+def test_subsample_zero_disagreement_equal_total() -> None:
+    # Sample and reference both only use category 0 in domain [0, 1]
+    # o_sum == e_sum and Do == 0, De == 0 -> should return 1.0, not NaN
+    data = np.array([[0, 0], [0, 0]])
+    res = krippendorff.alpha(data, value_domain=[0, 1], level_of_measurement="nominal")
+    assert res == 1.0

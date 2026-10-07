@@ -465,6 +465,9 @@ def alpha(  # noqa: C901
 
     if all_reliability_data is not None:
         all_rel = np.asarray(all_reliability_data)
+        all_computed_domain = _domain_from_reliability_data(all_rel)
+        if not np.isin(all_computed_domain, value_domain).all():
+            raise ValueError("The reference reliability data contains out-of-domain values.")
         all_counts = _reliability_data_to_value_counts(all_rel, value_domain)
         if (all_counts.sum(axis=-1) <= 1).all():
             raise ValueError(
@@ -492,6 +495,8 @@ def alpha(  # noqa: C901
             raise ValueError(
                 f"The random_coincidences shape {e.shape} must be equal to {(len(value_domain), len(value_domain))}."
             )
+        if not np.isfinite(e).all() or (e < 0).any() or e.sum() <= 0:
+            raise ValueError("The random_coincidences matrix must be non-negative, finite, and have a positive sum.")
         dist_n_v = e.sum(axis=0)
     else:
         e = _random_coincidences(n_v, dtype=dtype)
@@ -499,13 +504,8 @@ def alpha(  # noqa: C901
 
     d = _distances(value_domain, distance_metric, dist_n_v, dtype=dtype)
 
-    o_sum = o.sum()
-    e_sum = e.sum()
-    if o_sum == e_sum:
-        return 1 - (o * d).sum() / (e * d).sum()
-
-    do = (o * d).sum() / o_sum
-    de = (e * d).sum() / e_sum
+    do = (o * d).sum() / o.sum()
+    de = (e * d).sum() / e.sum()
     if de == 0:
         return 1.0 if do == 0 else 0.0
     return 1 - do / de
