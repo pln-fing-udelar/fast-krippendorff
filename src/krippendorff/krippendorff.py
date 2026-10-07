@@ -378,7 +378,8 @@ def _domain_from_raw_values(
         return computed_domain
 
     domain_arr = _to_domain_array(value_domain)
-    if not np.isin(computed_domain, domain_arr).all():
+    domain_set = set(domain_arr)
+    if any(v not in domain_set for v in unique_vals):
         raise ValueError("The reliability data contains out-of-domain values.")
     return domain_arr
 
@@ -403,8 +404,9 @@ def _dict_reliability_data_to_value_counts(
         for u, v in d.items():
             if not _is_missing(v):
                 idx = val_to_idx.get(v)
-                if idx is not None:
-                    value_counts[unit_to_idx[u], idx] += 1
+                if idx is None:
+                    raise ValueError("The reliability data contains out-of-domain values.")
+                value_counts[unit_to_idx[u], idx] += 1
 
     return value_counts, domain_arr
 

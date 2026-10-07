@@ -261,3 +261,14 @@ def test_dict_input_numpy_complex_labels_interval_rejected() -> None:
     ]
     with pytest.raises(ValueError, match="ordered value_domain is required"):
         krippendorff.alpha(reliability_data=data, level_of_measurement="interval")
+
+
+def test_dict_input_large_int_out_of_domain() -> None:
+    v1 = 2**53 + 1
+    v2 = float(2**53)
+    data = [
+        {"u1": v1, "u2": 1},
+        {"u1": v1, "u2": 1},
+    ]
+    with pytest.raises(ValueError, match="out-of-domain values"):
+        krippendorff.alpha(reliability_data=data, value_domain=[v2, 1], level_of_measurement="nominal")
