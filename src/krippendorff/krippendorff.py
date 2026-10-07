@@ -321,7 +321,8 @@ def _to_domain_array(domain_values: Any) -> npt.NDArray:
         except Exception:
             pass
     arr = np.empty(len(domain_list), dtype=object)
-    arr[:] = domain_list
+    for i, v in enumerate(domain_list):
+        arr[i] = v
     return arr
 
 
