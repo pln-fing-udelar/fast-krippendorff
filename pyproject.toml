@@ -38,6 +38,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8,<10",
+    "pytest-cov>=6,<8",
     "ruff>=0.3,<1",
     "ty<1",
 ]
@@ -50,7 +51,7 @@ Repository = "https://github.com/pln-fing-udelar/fast-krippendorff"
 Changelog = "https://github.com/pln-fing-udelar/fast-krippendorff/releases"
 
 [tool.ruff]
-include = ["src/**/*.py", "pyproject.toml", "example.py"]
+include = ["src/**/*.py", "pyproject.toml", "example.py", "tests/**/*.py"]
 line-length = 120
 
 [tool.ruff.lint]
@@ -62,7 +63,7 @@ ignore = [
 select = ["ANN", "B", "C", "C90", "E", "F", "I", "N", "RUF", "UP", "W"]
 
 [tool.ty.src]
-include = ["src/**/*.py", "example.py"]
+include = ["src/**/*.py", "example.py", "tests/**/*.py"]
 
 [tool.ty.terminal]
 error-on-warning = true
