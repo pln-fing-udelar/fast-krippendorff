@@ -37,12 +37,12 @@ classifiers = [
 
 requires-python = ">=3.11"
 dependencies = [
-    "numpy>=1.21,<3", # For NumPy Typing.
+    "numpy>=1.23.2,<3", # For NumPy Typing.
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=7,<10",
+    "pytest>=8,<10",
     "ruff>=0.3,<1",
     "ty<1",
 ]
