@@ -301,3 +301,24 @@ def test_value_counts_complex_domain_interval_rejected() -> None:
     vc = np.array([[2, 0], [0, 2]])
     with pytest.raises(ValueError, match="does not support complex"):
         krippendorff.alpha(value_counts=vc, value_domain=[1 + 2j, 3 + 4j], level_of_measurement="interval")
+
+
+def test_dict_input_mixed_signed_unsigned_large_integers() -> None:
+    v1 = -1
+    v2 = np.uint64(2**63)
+    v3 = np.uint64(2**63 + 1)
+    data = [
+        {"u1": v1, "u2": v2, "u3": v3},
+        {"u1": v1, "u2": v3, "u3": v2},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert res < 1.0
+
+
+def test_dict_input_complex_nan_missing_value() -> None:
+    data = [
+        {"u1": 1 + 2j, "u2": complex(np.nan, 0), "u3": 3 + 4j},
+        {"u1": 1 + 2j, "u2": complex(0, np.nan), "u3": 3 + 4j},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)

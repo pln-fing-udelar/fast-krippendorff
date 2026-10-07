@@ -283,6 +283,8 @@ def _is_missing(val: Any) -> bool:
         return True
     if isinstance(val, (float, np.floating)) and np.isnan(val):
         return True
+    if isinstance(val, (complex, np.complexfloating)) and (np.isnan(val.real) or np.isnan(val.imag)):
+        return True
     return False
 
 
@@ -291,7 +293,7 @@ def _is_numeric_scalar(val: Any) -> bool:
     return isinstance(val, (int, float, np.integer, np.floating)) and not isinstance(val, bool)
 
 
-def _to_domain_array(domain_values: Any) -> npt.NDArray:
+def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
     """Convert domain values to a 1-D ndarray, preserving object dtype for heterogeneous types."""
     if isinstance(domain_values, np.ndarray):
         return domain_values
@@ -305,7 +307,16 @@ def _to_domain_array(domain_values: Any) -> npt.NDArray:
     if all(isinstance(v, bytes) for v in domain_list):
         return np.asarray(domain_values)
     if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in domain_list):
-        return np.asarray(domain_values)
+        try:
+            as_arr = np.asarray(domain_values)
+            if np.issubdtype(as_arr.dtype, np.integer):
+                return as_arr
+        except Exception:
+            pass
+        arr = np.empty(len(domain_list), dtype=object)
+        for i, v in enumerate(domain_list):
+            arr[i] = v
+        return arr
     if all(isinstance(v, (float, np.floating)) for v in domain_list):
         return np.asarray(domain_values)
     if all(_is_numeric_scalar(v) for v in domain_list):
