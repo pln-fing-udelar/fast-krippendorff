@@ -150,9 +150,10 @@ def _coincidences(
     """
     pairable = np.maximum(value_counts.sum(axis=1), 2)
     weights = np.divide(value_counts, (pairable - 1)[:, np.newaxis], dtype=dtype)
-    coincidences = np.dot(value_counts.T.astype(dtype, copy=False), weights)
-    diag_sub = weights.sum(axis=0)
-    np.fill_diagonal(coincidences, coincidences.diagonal() - diag_sub)
+    value_counts_float = value_counts.astype(dtype, copy=False)
+    coincidences = np.dot(value_counts_float.T, weights)
+    diagonal = np.sum((value_counts_float - 1) * weights, axis=0, dtype=dtype)
+    np.fill_diagonal(coincidences, diagonal)
     return coincidences
 
 
