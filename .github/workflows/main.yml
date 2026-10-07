@@ -18,8 +18,6 @@ jobs:
         uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: false
-      - name: Set up Python
-        run: uv python install
       - name: Install the project
         run: uv sync
       - name: Lint with Ruff
