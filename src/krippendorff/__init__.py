@@ -1,1 +1,3 @@
-from krippendorff.krippendorff import alpha  # noqa: F401
+from .krippendorff import DEFAULT_DTYPE, DistanceMetric, LevelOfMeasurement, alpha
+
+__all__ = ["DEFAULT_DTYPE", "DistanceMetric", "LevelOfMeasurement", "alpha"]
