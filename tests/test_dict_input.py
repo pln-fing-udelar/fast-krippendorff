@@ -136,3 +136,25 @@ def test_standard_array_and_value_counts() -> None:
     # Non-inexact dtype
     with pytest.raises(ValueError, match="must be an inexact type"):
         krippendorff.alpha(reliability_data=arr, dtype=int)
+
+
+def test_dict_input_user_list_sequence() -> None:
+    from collections import UserList
+
+    data = UserList(
+        [
+            {"u1": 1, "u2": 2},
+            {"u1": 1, "u2": 2},
+        ]
+    )
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+
+def test_dict_input_literal_nan_string() -> None:
+    data = [
+        {"u1": "nan", "u2": "val"},
+        {"u1": "nan", "u2": "val"},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)

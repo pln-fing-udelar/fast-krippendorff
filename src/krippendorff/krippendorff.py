@@ -267,7 +267,12 @@ def _is_dict_reliability_data(data: Any) -> bool:
     """Check if the data is structured as dictionary/mapping annotations."""
     if isinstance(data, Mapping):
         return True
-    if isinstance(data, (list, tuple)) and len(data) > 0 and all(isinstance(x, Mapping) for x in data):
+    if (
+        isinstance(data, Sequence)
+        and not isinstance(data, (str, bytes))
+        and len(data) > 0
+        and all(isinstance(x, Mapping) for x in data)
+    ):
         return True
     return False
 
@@ -277,8 +282,6 @@ def _is_missing(val: Any) -> bool:
     if val is None:
         return True
     if isinstance(val, (float, np.floating)) and np.isnan(val):
-        return True
-    if isinstance(val, str) and val == "nan":
         return True
     return False
 
