@@ -292,11 +292,37 @@ def _is_numeric_scalar(val: Any) -> bool:
 
 
 def _to_domain_array(domain_values: Any) -> npt.NDArray:
-    """Convert domain values to ndarray, preserving object dtype for mixed types."""
-    domain_list = list(domain_values) if hasattr(domain_values, "__iter__") else list(np.asarray(domain_values))
-    if all(_is_numeric_scalar(v) for v in domain_list) or all(isinstance(v, (str, bytes)) for v in domain_list):
+    """Convert domain values to a 1-D ndarray, preserving object dtype for heterogeneous types."""
+    if isinstance(domain_values, np.ndarray):
+        return domain_values
+    domain_list = (
+        list(domain_values)
+        if hasattr(domain_values, "__iter__") and not isinstance(domain_values, (str, bytes))
+        else list(np.asarray(domain_values))
+    )
+    if all(isinstance(v, str) for v in domain_list):
         return np.asarray(domain_values)
-    return np.array(domain_list, dtype=object)
+    if all(isinstance(v, bytes) for v in domain_list):
+        return np.asarray(domain_values)
+    if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in domain_list):
+        return np.asarray(domain_values)
+    if all(isinstance(v, (float, np.floating)) for v in domain_list):
+        return np.asarray(domain_values)
+    if all(_is_numeric_scalar(v) for v in domain_list):
+        try:
+            as_arr = np.asarray(domain_values)
+            if (
+                as_arr.ndim == 1
+                and len(as_arr) == len(domain_list)
+                and len(set(as_arr.tolist())) == len(set(domain_list))
+                and all(v == arr_v.item() for v, arr_v in zip(domain_list, as_arr, strict=True))
+            ):
+                return as_arr
+        except Exception:
+            pass
+    arr = np.empty(len(domain_list), dtype=object)
+    arr[:] = domain_list
+    return arr
 
 
 def _extract_coder_dicts(
@@ -333,8 +359,9 @@ def _domain_from_raw_values(
         pass
 
     all_numeric = all(_is_numeric_scalar(v) for v in unique_vals)
-    all_str = all(isinstance(v, (str, bytes)) for v in unique_vals)
-    has_mixed_types = not (all_numeric or all_str)
+    all_str = all(isinstance(v, str) for v in unique_vals)
+    all_bytes = all(isinstance(v, bytes) for v in unique_vals)
+    has_mixed_types = not (all_numeric or all_str or all_bytes)
     computed_domain = _to_domain_array(unique_vals)
 
     if value_domain is None:
@@ -522,7 +549,7 @@ def alpha(  # noqa: C901
                     )
                 value_domain = computed_value_domain
             else:
-                value_domain = np.asarray(value_domain)
+                value_domain = _to_domain_array(value_domain)
                 # Note: We do not need to test for `np.nan` in the input data.
                 # `np.nan` indicates the absence of a domain value and is always allowed.
                 if not np.isin(computed_value_domain, value_domain).all():
@@ -535,7 +562,7 @@ def alpha(  # noqa: C901
         if value_domain is None:
             value_domain = np.arange(value_counts.shape[1])
         else:
-            value_domain = np.asarray(value_domain)
+            value_domain = _to_domain_array(value_domain)
             if value_counts.shape[1] != len(value_domain):
                 raise ValueError("The value domain should be equal to the number of columns of value_counts.")
 

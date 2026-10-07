@@ -199,3 +199,38 @@ def test_dict_input_sequence_with_non_mapping_element() -> None:
     data: Any = [{"u1": 1}, [1, 2]]
     with pytest.raises(ValueError, match="Expected a sequence of mappings for coder annotations, but element 1"):
         krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+
+
+def test_dict_input_tuple_labels() -> None:
+    data = [
+        {"u1": (1, 2), "u2": (3, 4)},
+        {"u1": (1, 2), "u2": (3, 4)},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+
+def test_dict_input_bytes_and_str_labels() -> None:
+    data = [
+        {"u1": b"a", "u2": "a"},
+        {"u1": b"a", "u2": "a"},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+
+def test_dict_input_large_int_and_float_labels() -> None:
+    v1 = 2**53 + 1
+    v2 = float(2**53)
+    data = [
+        {"u1": v1, "u2": v2},
+        {"u1": v1, "u2": v2},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+
+def test_value_counts_tuple_value_domain() -> None:
+    vc = np.array([[2, 0], [0, 2]])
+    res = krippendorff.alpha(value_counts=vc, value_domain=[(1, 2), (3, 4)], level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
