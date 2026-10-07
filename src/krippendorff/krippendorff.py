@@ -148,11 +148,13 @@ def _coincidences(
     o : ndarray, with shape (V, V)
         Coincidence matrix.
     """
-    _, V = value_counts.shape  # noqa: N806
     pairable = np.maximum(value_counts.sum(axis=1), 2)
-    diagonals = value_counts[:, np.newaxis, :] * np.eye(V)[np.newaxis, ...]
-    unnormalized_coincidences = value_counts[..., np.newaxis] * value_counts[:, np.newaxis, :] - diagonals
-    return np.divide(unnormalized_coincidences, (pairable - 1).reshape((-1, 1, 1)), dtype=dtype).sum(axis=0)
+    weights = np.divide(value_counts, (pairable - 1)[:, np.newaxis], dtype=dtype)
+    value_counts_float = value_counts.astype(dtype, copy=False)
+    coincidences = np.dot(value_counts_float.T, weights)
+    diagonal = np.sum((value_counts_float - 1) * weights, axis=0, dtype=dtype)
+    np.fill_diagonal(coincidences, diagonal)
+    return coincidences
 
 
 def _random_coincidences(

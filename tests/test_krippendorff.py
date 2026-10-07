@@ -1,4 +1,5 @@
 import re
+import tracemalloc
 
 import numpy as np
 import numpy.typing as npt
@@ -235,3 +236,41 @@ def test_package_exports() -> None:
         "alpha",
     ]:
         assert hasattr(krippendorff, name)
+
+
+def test_coincidences_peak_memory() -> None:
+    """Ensure coincidence matrix computation uses O(N * V + V^2) memory rather than O(N * V^2) (fixes #38)."""
+    n_units = 2000
+    n_values = 200
+    rng = np.random.default_rng(42)
+    unit_indices = np.repeat(np.arange(n_units), 2)
+    coder_values = rng.integers(0, n_values, size=2 * n_units)
+    value_counts = np.zeros((n_units, n_values), dtype=np.int_)
+    np.add.at(value_counts, (unit_indices, coder_values), 1)
+
+    tracemalloc.start()
+    tracemalloc.reset_peak()
+    try:
+        coincidences = krippendorff.krippendorff._coincidences(value_counts)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert coincidences.shape == (n_values, n_values)
+    # The old O(N * V^2) tensor broadcast allocated ~640 MB of RAM for N=2000, V=200.
+    # The BLAS matrix product operates in O(N * V + V^2) space, allocating < 25 MB.
+    assert peak < 25 * 1024 * 1024
+
+
+def test_coincidences_diagonal_numerical_stability() -> None:
+    """Ensure diagonal computation avoids catastrophic cancellation in low precision."""
+    n_units = 5000
+    n_values = 2
+    value_counts = np.ones((n_units + 1, n_values), dtype=np.int_)
+    value_counts[-1, 0] = 2
+    value_counts[-1, 1] = 1
+
+    coincidences = krippendorff.krippendorff._coincidences(value_counts, dtype=np.dtype(np.float16))
+    assert coincidences.dtype == np.float16
+    assert np.isclose(coincidences[0, 0], 1.0)
+    assert np.isclose(coincidences[1, 1], 0.0)
