@@ -55,7 +55,12 @@ include = ["src/**/*.py", "pyproject.toml", "sample.py"]
 line-length = 120
 
 [tool.ruff.lint]
-select = ["B", "C", "C90", "E", "F", "I", "N", "RUF", "UP", "W"]
+ignore = [
+    "ANN002",  # `*args` / `**kwargs`: the only annotation that fits is `Any`, which ANN401 then rejects.
+    "ANN003",
+    "ANN401",  # `Any` is the honest answer for a genuinely heterogeneous param; forbidding it invites a lie.
+]
+select = ["ANN", "B", "C", "C90", "E", "F", "I", "N", "RUF", "UP", "W"]
 
 [tool.ty.src]
 include = ["src/**/*.py", "sample.py"]

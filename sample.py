@@ -4,7 +4,7 @@ import numpy as np
 import krippendorff
 
 
-def main():
+def main() -> None:
     print("Example from https://en.wikipedia.org/wiki/Krippendorff's_Alpha")
     print()
     reliability_data_str = (
