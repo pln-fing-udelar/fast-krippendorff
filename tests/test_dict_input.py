@@ -322,3 +322,25 @@ def test_dict_input_complex_nan_missing_value() -> None:
     ]
     res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
     assert np.isclose(res, 1.0)
+
+
+def test_dict_input_does_not_materialize_all_annotations(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 2 coders, 100 units, each rating 0 or 1 -> 200 total annotations, but only 2 distinct domain values
+    data = [
+        {f"u{i}": i % 2 for i in range(100)},
+        {f"u{i}": i % 2 for i in range(100)},
+    ]
+    received_lengths: list[int] = []
+    orig_fn = krippendorff.krippendorff._domain_from_raw_values
+
+    def spy_domain_fn(distinct_values: Any, *args: Any, **kwargs: Any) -> Any:
+        received_lengths.append(len(distinct_values))
+        return orig_fn(distinct_values, *args, **kwargs)
+
+    monkeypatch.setattr(krippendorff.krippendorff, "_domain_from_raw_values", spy_domain_fn)
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+    assert len(received_lengths) == 1
+    # Must only receive distinct domain values (2), NOT all 200 annotations
+    assert received_lengths[0] == 2

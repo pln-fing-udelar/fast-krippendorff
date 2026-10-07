@@ -359,12 +359,12 @@ def _extract_coder_dicts(
 
 
 def _domain_from_raw_values(
-    raw_values: list[Any],
+    distinct_values: Sequence[Any],
     value_domain: npt.ArrayLike | None,
     level_of_measurement: LevelOfMeasurement,
 ) -> npt.NDArray:
     """Compute and validate the value domain from extracted mapping values."""
-    unique_vals = list(dict.fromkeys(raw_values))
+    unique_vals = list(distinct_values)
     try:
         unique_vals = sorted(unique_vals)
     except TypeError:
@@ -382,7 +382,11 @@ def _domain_from_raw_values(
                 "When using mixed types, an ordered value_domain is required "
                 "for level_of_measurement other than 'nominal'."
             )
-        if len(raw_values) > 0 and isinstance(raw_values[0], (str, bytes)) and level_of_measurement != "nominal":
+        if (
+            len(distinct_values) > 0
+            and isinstance(distinct_values[0], (str, bytes))
+            and level_of_measurement != "nominal"
+        ):
             raise ValueError(
                 "When using strings, an ordered value_domain is required for level_of_measurement other than 'nominal'."
             )
@@ -408,8 +412,8 @@ def _dict_reliability_data_to_value_counts(
     coder_dicts = _extract_coder_dicts(data)
 
     units = list(dict.fromkeys(u for d in coder_dicts for u in d.keys()))
-    raw_values = [v for d in coder_dicts for v in d.values() if not _is_missing(v)]
-    domain_arr = _domain_from_raw_values(raw_values, value_domain, level_of_measurement)
+    distinct_values = list(dict.fromkeys(v for d in coder_dicts for v in d.values() if not _is_missing(v)))
+    domain_arr = _domain_from_raw_values(distinct_values, value_domain, level_of_measurement)
 
     unit_to_idx = {u: i for i, u in enumerate(units)}
     val_to_idx = {v: i for i, v in enumerate(domain_arr)}
