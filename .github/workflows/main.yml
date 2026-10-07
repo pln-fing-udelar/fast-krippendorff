@@ -44,6 +44,6 @@ jobs:
       - name: Install the project
         run: uv sync --resolution ${{ matrix.resolution-strategy }}
       - name: Test
-        run: uv run pytest --doctest-modules
+        run: uv run pytest --doctest-modules --cov=krippendorff --cov-fail-under=90
       - name: Run example
         run: uv run python example.py
