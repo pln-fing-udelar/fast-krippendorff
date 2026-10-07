@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -170,6 +172,6 @@ def test_dict_input_mixed_nominal_labels() -> None:
 
 
 def test_dict_input_malformed_flat_dict() -> None:
-    flat_data = {"u1": 1, "u2": 2}
+    flat_data: Any = {"u1": 1, "u2": 2}
     with pytest.raises(ValueError, match="Expected a mapping of coders to unit annotations"):
-        krippendorff.alpha(reliability_data=flat_data, level_of_measurement="nominal")  # ty:ignore[invalid-argument-type]
+        krippendorff.alpha(reliability_data=flat_data, level_of_measurement="nominal")
