@@ -2,3 +2,8 @@ dist
 
 # codespaces:
 pythonenv3.9
+
+.coverage
+.coverage.*
+test-reports/
+htmlcov/
