@@ -271,7 +271,7 @@ def _is_dict_reliability_data(data: Any) -> bool:
         isinstance(data, Sequence)
         and not isinstance(data, (str, bytes))
         and len(data) > 0
-        and all(isinstance(x, Mapping) for x in data)
+        and any(isinstance(x, Mapping) for x in data)
     ):
         return True
     return False
@@ -284,6 +284,19 @@ def _is_missing(val: Any) -> bool:
     if isinstance(val, (float, np.floating)) and np.isnan(val):
         return True
     return False
+
+
+def _is_numeric_scalar(val: Any) -> bool:
+    """Check if a value is a numeric scalar type."""
+    return isinstance(val, (int, float, np.number)) and not isinstance(val, bool)
+
+
+def _to_domain_array(domain_values: Any) -> npt.NDArray:
+    """Convert domain values to ndarray, preserving object dtype for mixed types."""
+    domain_list = list(domain_values) if hasattr(domain_values, "__iter__") else list(np.asarray(domain_values))
+    if all(_is_numeric_scalar(v) for v in domain_list) or all(isinstance(v, (str, bytes)) for v in domain_list):
+        return np.asarray(domain_values)
+    return np.array(domain_list, dtype=object)
 
 
 def _extract_coder_dicts(
@@ -319,8 +332,10 @@ def _domain_from_raw_values(
     except TypeError:
         pass
 
-    has_mixed_types = len({type(v) for v in unique_vals}) > 1
-    computed_domain = np.array(unique_vals, dtype=object) if has_mixed_types else np.asarray(unique_vals)
+    all_numeric = all(_is_numeric_scalar(v) for v in unique_vals)
+    all_str = all(isinstance(v, (str, bytes)) for v in unique_vals)
+    has_mixed_types = not (all_numeric or all_str)
+    computed_domain = _to_domain_array(unique_vals)
 
     if value_domain is None:
         if has_mixed_types and level_of_measurement != "nominal":
@@ -334,7 +349,7 @@ def _domain_from_raw_values(
             )
         return computed_domain
 
-    domain_arr = np.asarray(value_domain)
+    domain_arr = _to_domain_array(value_domain)
     if not np.isin(computed_domain, domain_arr).all():
         raise ValueError("The reliability data contains out-of-domain values.")
     return domain_arr

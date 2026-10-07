@@ -175,3 +175,27 @@ def test_dict_input_malformed_flat_dict() -> None:
     flat_data: Any = {"u1": 1, "u2": 2}
     with pytest.raises(ValueError, match="Expected a mapping of coders to unit annotations"):
         krippendorff.alpha(reliability_data=flat_data, level_of_measurement="nominal")
+
+
+def test_dict_input_mixed_numeric_types_interval() -> None:
+    data = [
+        {"u1": 1, "u2": 2.5},
+        {"u1": 1.0, "u2": 2.5},
+    ]
+    res = krippendorff.alpha(reliability_data=data, level_of_measurement="interval")
+    assert np.isclose(res, 1.0)
+
+
+def test_dict_input_explicit_mixed_value_domain_nominal() -> None:
+    data = [
+        {"u1": 1, "u2": "a"},
+        {"u1": 1, "u2": "a"},
+    ]
+    res = krippendorff.alpha(reliability_data=data, value_domain=[1, "a", 2], level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+
+def test_dict_input_sequence_with_non_mapping_element() -> None:
+    data: Any = [{"u1": 1}, [1, 2]]
+    with pytest.raises(ValueError, match="Expected a sequence of mappings for coder annotations, but element 1"):
+        krippendorff.alpha(reliability_data=data, level_of_measurement="nominal")
