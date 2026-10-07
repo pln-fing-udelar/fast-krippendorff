@@ -9,6 +9,24 @@ on:
   release:
     types: [ published ]
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: false
+      - name: Install the project
+        run: uv sync
+      - name: Lint with Ruff
+        run: uv run ruff check
+      - name: Check formatting with Ruff
+        run: uv run ruff format --check
+      - name: Type-check with ty
+        run: uv run ty check
+
   build:
     runs-on: ubuntu-latest
     strategy:
@@ -31,3 +49,5 @@ jobs:
         run: uv sync --resolution ${{ matrix.resolution-strategy }}
       - name: Test
         run: uv run pytest --doctest-modules
+      - name: Run example
+        run: uv run python example.py

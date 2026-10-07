@@ -14,6 +14,15 @@ import numpy.typing as npt
 
 DEFAULT_DTYPE = np.float64
 
+__all__ = [
+    "DEFAULT_DTYPE",
+    "DistanceMetric",
+    "LevelOfMeasurement",
+    "MetricResultScalarType",
+    "ValueScalarType",
+    "alpha",
+]
+
 
 ValueScalarType = TypeVar("ValueScalarType", bound=np.generic)
 MetricResultScalarType = TypeVar("MetricResultScalarType", bound=np.inexact)
