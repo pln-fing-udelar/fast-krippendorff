@@ -214,12 +214,15 @@ def test_error_strings_without_ordered_domain_non_nominal() -> None:
 
 
 def test_error_unsupported_dtype_kind() -> None:
-    data = [
-        [object(), object()],
-        [object(), object()],
-    ]
+    data = np.array(
+        [
+            [object(), object()],
+            [object(), object()],
+        ],
+        dtype=object,
+    )
     with pytest.raises(ValueError, match="Don't know how to construct value domain for dtype kind"):
-        alpha(data)  # ty:ignore[invalid-argument-type]
+        alpha(data)
 
 
 def test_package_exports() -> None:
