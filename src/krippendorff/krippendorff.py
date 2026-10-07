@@ -7,7 +7,8 @@ For more information, see: https://en.wikipedia.org/wiki/Krippendorff%27s_alpha
 The module naming follows the one from the Wikipedia link.
 """
 
-from typing import Literal, Protocol, TypeVar
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, Protocol, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -262,8 +263,72 @@ def _reliability_data_to_value_counts(
     return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)
 
 
+def _is_dict_reliability_data(data: Any) -> bool:
+    """Check if the data is structured as dictionary/mapping annotations."""
+    if isinstance(data, Mapping):
+        return True
+    if isinstance(data, (list, tuple)) and len(data) > 0 and all(isinstance(x, Mapping) for x in data):
+        return True
+    return False
+
+
+def _is_missing(val: Any) -> bool:
+    """Check if a value represents a missing annotation."""
+    if val is None:
+        return True
+    if isinstance(val, (float, np.floating)) and np.isnan(val):
+        return True
+    if isinstance(val, str) and val == "nan":
+        return True
+    return False
+
+
+def _dict_reliability_data_to_value_counts(
+    data: Mapping[Any, Any] | Sequence[Mapping[Any, Any]],
+    value_domain: npt.ArrayLike | None,
+    level_of_measurement: LevelOfMeasurement,
+) -> tuple[npt.NDArray[np.int_], npt.NDArray]:
+    """Convert dictionary-based reliability data directly into value counts."""
+    if isinstance(data, Mapping):
+        coder_dicts = list(data.values())
+    else:
+        coder_dicts = list(data)
+
+    units = list(dict.fromkeys(u for d in coder_dicts for u in d.keys()))
+    raw_values = [v for d in coder_dicts for v in d.values() if not _is_missing(v)]
+
+    try:
+        computed_value_domain = np.unique(raw_values)
+    except TypeError:
+        computed_value_domain = np.array(list(dict.fromkeys(raw_values)))
+
+    if value_domain is None:
+        if len(raw_values) > 0 and isinstance(raw_values[0], (str, bytes)) and level_of_measurement != "nominal":
+            raise ValueError(
+                "When using strings, an ordered value_domain is required for level_of_measurement other than 'nominal'."
+            )
+        domain_arr = computed_value_domain
+    else:
+        domain_arr = np.asarray(value_domain)
+        if not np.isin(computed_value_domain, domain_arr).all():
+            raise ValueError("The reliability data contains out-of-domain values.")
+
+    unit_to_idx = {u: i for i, u in enumerate(units)}
+    val_to_idx = {v: i for i, v in enumerate(domain_arr)}
+
+    value_counts = np.zeros((len(units), len(domain_arr)), dtype=np.int_)
+    for d in coder_dicts:
+        for u, v in d.items():
+            if not _is_missing(v):
+                idx = val_to_idx.get(v)
+                if idx is not None:
+                    value_counts[unit_to_idx[u], idx] += 1
+
+    return value_counts, domain_arr
+
+
 def alpha(  # noqa: C901
-    reliability_data: npt.ArrayLike | None = None,
+    reliability_data: npt.ArrayLike | Mapping[Any, Any] | Sequence[Mapping[Any, Any]] | None = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",
@@ -275,10 +340,15 @@ def alpha(  # noqa: C901
 
     Parameters
     ----------
-    reliability_data : array_like, with shape (M, N)
-        Reliability data matrix which has the rate the i coder gave to the j unit, where M is the number of raters
-        and N is the unit count.
-        Missing rates are represented with `np.nan`.
+    reliability_data : array_like or sequence of dicts or dict of dicts, optional
+        Reliability data containing the ratings assigned by coders to units.
+        Can be:
+        - A 2D array_like of shape (M, N) where M is the number of coders and N is the unit count.
+          Missing rates are represented with `np.nan`.
+        - A sequence of dicts where each dict represents a coder mapping units to values:
+          `[{unit1: val, unit2: val}, {unit1: val, ...}]`.
+        - A dict of dicts where outer keys represent coders and inner dicts map units to values:
+          `{coder1: {unit1: val, ...}, coder2: {unit1: val, ...}}`.
         If it's provided then `value_counts` must not be provided.
 
     value_counts : array_like, with shape (N, V)
@@ -356,40 +426,55 @@ def alpha(  # noqa: C901
     >>> # Note that without an ordered value_domain, we can only calculate nominal distances on strings.
     >>> print(round(alpha(reliability_data, level_of_measurement="nominal"), 3))
     0.743
+    >>> # Sequence of dicts example:
+    >>> data_dicts = [
+    ...     {"u1": 1, "u2": 2, "u3": 3},
+    ...     {"u1": 1, "u2": 2, "u3": 4},
+    ...     {"u2": 2, "u3": 3},
+    ... ]
+    >>> print(round(alpha(reliability_data=data_dicts, level_of_measurement="interval"), 3))
+    0.883
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
 
     # Don't know if it's a `list` or NumPy array. If it's the latter, the truth value is ambiguous. So, ask for `None`.
     if value_counts is None:
-        reliability_data = np.asarray(reliability_data)
-
-        kind = reliability_data.dtype.kind
-        if kind in {"i", "u", "f"}:
-            # `np.isnan` only operates on signed integers, unsigned integers, and floats, not strings.
-            computed_value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
-        elif kind in {"U", "S"}:  # Unicode or byte string.
-            # `np.asarray` will coerce `np.nan` values to "nan".
-            computed_value_domain = np.unique(reliability_data[reliability_data != "nan"])
+        if _is_dict_reliability_data(reliability_data):
+            value_counts, value_domain = _dict_reliability_data_to_value_counts(
+                reliability_data,  # ty:ignore[invalid-argument-type]
+                value_domain,
+                level_of_measurement,
+            )
         else:
-            raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
+            reliability_data = np.asarray(reliability_data)
 
-        if value_domain is None:
-            # Check if Unicode or byte string.
-            if kind in {"U", "S"} and level_of_measurement != "nominal":
-                raise ValueError(
-                    "When using strings, an ordered value_domain is required"
-                    " for level_of_measurement other than 'nominal'."
-                )
-            value_domain = computed_value_domain
-        else:
-            value_domain = np.asarray(value_domain)
-            # Note: We do not need to test for `np.nan` in the input data.
-            # `np.nan` indicates the absence of a domain value and is always allowed.
-            if not np.isin(computed_value_domain, value_domain).all():
-                raise ValueError("The reliability data contains out-of-domain values.")
+            kind = reliability_data.dtype.kind
+            if kind in {"i", "u", "f"}:
+                # `np.isnan` only operates on signed integers, unsigned integers, and floats, not strings.
+                computed_value_domain = np.unique(reliability_data[~np.isnan(reliability_data)])
+            elif kind in {"U", "S"}:  # Unicode or byte string.
+                # `np.asarray` will coerce `np.nan` values to "nan".
+                computed_value_domain = np.unique(reliability_data[reliability_data != "nan"])
+            else:
+                raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
-        value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
+            if value_domain is None:
+                # Check if Unicode or byte string.
+                if kind in {"U", "S"} and level_of_measurement != "nominal":
+                    raise ValueError(
+                        "When using strings, an ordered value_domain is required"
+                        " for level_of_measurement other than 'nominal'."
+                    )
+                value_domain = computed_value_domain
+            else:
+                value_domain = np.asarray(value_domain)
+                # Note: We do not need to test for `np.nan` in the input data.
+                # `np.nan` indicates the absence of a domain value and is always allowed.
+                if not np.isin(computed_value_domain, value_domain).all():
+                    raise ValueError("The reliability data contains out-of-domain values.")
+
+            value_counts = _reliability_data_to_value_counts(reliability_data, value_domain)
     else:
         value_counts = np.asarray(value_counts)
 
