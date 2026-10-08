@@ -504,3 +504,23 @@ def test_bipolar_oversized_integer_support() -> None:
     dummy_nv = np.array([1.0])
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert np.isclose(dist[0], 1.0 / 3.0)
+
+
+def test_bipolar_fractional_endpoints_large_integer_categories_no_collapse() -> None:
+    bip_fn = bipolar_metric(low=0.5, high=float(2**54))
+    v1 = np.array([2**53], dtype=np.int64)
+    v2 = np.array([2**53 + 1], dtype=np.int64)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert dist[0] > 0.0
+
+
+def test_circular_fractional_circumference_large_integer_categories_no_collapse() -> None:
+    circ_fn = circular_metric(circumference=4.5)
+    v1 = np.array([2**53], dtype=np.int64)
+    v2 = np.array([2**53 + 1], dtype=np.int64)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert dist[0] > 0.0

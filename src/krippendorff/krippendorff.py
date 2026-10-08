@@ -206,8 +206,7 @@ def _circular_diff(
     real_dtype: np.dtype,
 ) -> Any:
     """Compute circular difference, reducing floating-point operands modulo u to avoid overflow."""
-    u_norm = _to_int_if_integral(u)
-    if _is_all_pure_integer(v1) and _is_all_pure_integer(v2) and isinstance(u_norm, (int, np.integer)):
+    if _is_all_pure_integer(v1) and _is_all_pure_integer(v2):
         return _safe_diff(v1, v2)
     calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
     v1_f = np.asarray(v1, dtype=calc_dtype)
@@ -321,13 +320,18 @@ def _bipolar_terms(
     min_f = float(v_min)
     max_f = float(v_max)
     max_abs = max(abs(min_f), abs(max_f))
+    exp = 0
     if max_abs > 0:
         _, exp = math.frexp(max_abs)
         v1_f = np.ldexp(v1_f, -exp)
         v2_f = np.ldexp(v2_f, -exp)
         min_f = math.ldexp(min_f, -exp)
         max_f = math.ldexp(max_f, -exp)
-    diff_f = v1_f - v2_f
+    if _is_all_pure_integer(v1) and _is_all_pure_integer(v2):
+        diff = _safe_diff(v1, v2)
+        diff_f = np.ldexp(np.asarray(diff, dtype=calc_dtype), -exp)
+    else:
+        diff_f = v1_f - v2_f
     term1_f = (v1_f - min_f) + (v2_f - min_f)
     term2_f = (max_f - v1_f) + (max_f - v2_f)
     ratio1 = np.divide(
