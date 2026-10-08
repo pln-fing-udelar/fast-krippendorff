@@ -213,3 +213,35 @@ def test_invalid_parameters_and_data() -> None:
 
     with pytest.raises(ValueError, match="requires finite values"):
         bip_fn(np.array([np.nan]), np.array([1]), dummy_idx, dummy_idx, dummy_nv)
+
+
+def test_circular_and_bipolar_symmetry_across_differing_domains() -> None:
+    circ_fn = circular_metric()
+    bip_fn = bipolar_metric()
+    dummy_idx = np.array([0, 0])
+    dummy_nv = np.array([1.0, 1.0])
+
+    a = np.array([0, 1])
+    b = np.array([1, 3])
+
+    circ_ab = circ_fn(a, b, dummy_idx, dummy_idx, dummy_nv)
+    circ_ba = circ_fn(b, a, dummy_idx, dummy_idx, dummy_nv)
+    assert np.allclose(circ_ab, circ_ba)
+
+    bip_ab = bip_fn(a, b, dummy_idx, dummy_idx, dummy_nv)
+    bip_ba = bip_fn(b, a, dummy_idx, dummy_idx, dummy_nv)
+    assert np.allclose(bip_ab, bip_ba)
+
+
+def test_circular_metric_uint_subtraction_overflow() -> None:
+    circ_fn = circular_metric(circumference=360)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+
+    u1 = np.array([0], dtype=np.uint8)
+    u2 = np.array([5], dtype=np.uint8)
+
+    d1 = circ_fn(u1, u2, dummy_idx, dummy_idx, dummy_nv)
+    d2 = circ_fn(u2, u1, dummy_idx, dummy_idx, dummy_nv)
+    assert np.allclose(d1, d2)
+    assert np.allclose(d1, np.sin(np.pi * 5 / 360) ** 2)

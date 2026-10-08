@@ -162,6 +162,8 @@ def circular_metric(
             raise ValueError("Circular metric does not support complex values.")
         if not np.isfinite(v1).all() or not np.isfinite(v2).all():
             raise ValueError("Circular metric requires finite values.")
+        v1_cast = v1.astype(dtype)
+        v2_cast = v2.astype(dtype)
         if circumference is None:
             is_int_1 = np.issubdtype(v1.dtype, np.integer) or (
                 np.issubdtype(v1.dtype, np.floating) and np.all(v1 % 1 == 0)  # ty:ignore[unsupported-operator]
@@ -171,10 +173,12 @@ def circular_metric(
             )
             if not (is_int_1 and is_int_2):
                 raise ValueError("An explicit circumference must be provided for non-integer circular data.")
-            u = float(np.max(v1)) - float(np.min(v1)) + 1
+            v_min = min(float(np.min(v1)), float(np.min(v2)))
+            v_max = max(float(np.max(v1)), float(np.max(v2)))
+            u = v_max - v_min + 1
         else:
             u = float(circumference)
-        diff = (v1 - v2).astype(dtype)  # ty:ignore[unsupported-operator]
+        diff = v1_cast - v2_cast
         return (np.sin(np.pi * diff / u) ** 2).astype(dtype)
 
     return _metric
@@ -217,8 +221,8 @@ def bipolar_metric(
             raise ValueError("Bipolar metric does not support complex values.")
         if not np.isfinite(v1).all() or not np.isfinite(v2).all():
             raise ValueError("Bipolar metric requires finite values.")
-        v_min = float(low) if low is not None else float(np.min(v1))
-        v_max = float(high) if high is not None else float(np.max(v1))
+        v_min = float(low) if low is not None else min(float(np.min(v1)), float(np.min(v2)))
+        v_max = float(high) if high is not None else max(float(np.max(v1)), float(np.max(v2)))
         if v_min >= v_max:
             raise ValueError("low must be strictly less than high.")
         if (v1 < v_min).any() or (v1 > v_max).any() or (v2 < v_min).any() or (v2 > v_max).any():  # ty:ignore[unsupported-operator]
