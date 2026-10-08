@@ -379,3 +379,20 @@ def test_bipolar_int32_overflow_prevention() -> None:
     v2 = np.array([100_000], dtype=np.int32)
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert np.allclose(dist, 1.0)
+
+
+def test_int64_min_max_span_overflow_prevention() -> None:
+    i_min = np.iinfo(np.int64).min
+    i_max = np.iinfo(np.int64).max
+    v1 = np.array([i_min], dtype=np.int64)
+    v2 = np.array([i_max], dtype=np.int64)
+
+    circ_fn = circular_metric()
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist_circ = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.all(np.isfinite(dist_circ))
+
+    bip_fn = bipolar_metric()
+    dist_bip = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.allclose(dist_bip, 1.0)

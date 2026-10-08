@@ -153,6 +153,14 @@ def _is_all_integer(arr: npt.NDArray) -> bool:
     return bool(np.all(arr.astype(float) % 1 == 0))
 
 
+def _to_object_int(x: Any) -> Any:
+    """Convert an integer scalar or array to Python int objects to avoid NumPy overflow."""
+    x_arr = np.asarray(x)
+    if x_arr.ndim == 0:
+        return int(x_arr.item())
+    return np.array([int(item) for item in x_arr.flat], dtype=object).reshape(x_arr.shape)
+
+
 def _safe_diff(a: Any, b: Any) -> Any:
     """Compute difference safely, avoiding integer underflow/overflow and precision loss."""
     a_arr = np.asarray(a)
@@ -160,8 +168,8 @@ def _safe_diff(a: Any, b: Any) -> Any:
     if np.issubdtype(a_arr.dtype, np.floating) or np.issubdtype(b_arr.dtype, np.floating):
         return a - b
     if np.issubdtype(a_arr.dtype, np.integer) or np.issubdtype(b_arr.dtype, np.integer):
-        if a_arr.dtype == np.uint64 or b_arr.dtype == np.uint64:
-            return np.asarray(a, dtype=object) - np.asarray(b, dtype=object)
+        if a_arr.dtype in (np.int64, np.uint64) or b_arr.dtype in (np.int64, np.uint64):
+            return _to_object_int(a) - _to_object_int(b)
         return np.asarray(a, dtype=np.int64) - np.asarray(b, dtype=np.int64)
     return a - b
 
