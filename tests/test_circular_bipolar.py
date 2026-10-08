@@ -146,10 +146,10 @@ def test_circular_bipolar_subsamples() -> None:
 
 
 def test_invalid_parameters_and_data() -> None:
-    with pytest.raises(ValueError, match="Circumference must be positive"):
+    with pytest.raises(ValueError, match="finite, positive number"):
         circular_metric(circumference=0)
 
-    with pytest.raises(ValueError, match="Circumference must be positive"):
+    with pytest.raises(ValueError, match="finite, positive number"):
         circular_metric(circumference=-10)
 
     with pytest.raises(ValueError, match="low must be strictly less than high"):
@@ -180,3 +180,36 @@ def test_invalid_parameters_and_data() -> None:
     metric_bip_low = bipolar_metric(low=10)
     with pytest.raises(ValueError, match="low must be strictly less than high"):
         alpha([[1, 2], [1, 2]], level_of_measurement=metric_bip_low)
+
+    # Non-integer circular data without explicit circumference
+    float_data = [[0.5, 1.2], [0.5, 1.2]]
+    with pytest.raises(ValueError, match="explicit circumference must be provided"):
+        alpha(float_data, level_of_measurement="circular")
+
+    # Non-finite circumference, low, high
+    with pytest.raises(ValueError, match="finite, positive number"):
+        circular_metric(circumference=float("inf"))
+
+    with pytest.raises(ValueError, match="low must be a finite number"):
+        bipolar_metric(low=float("nan"))
+
+    with pytest.raises(ValueError, match="high must be a finite number"):
+        bipolar_metric(high=float("inf"))
+
+    # Direct calls to metric callable with complex or non-finite inputs
+    circ_fn = circular_metric(4)
+    bip_fn = bipolar_metric(-1, 1)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+
+    with pytest.raises(ValueError, match="does not support complex"):
+        circ_fn(np.array([1 + 2j]), np.array([1]), dummy_idx, dummy_idx, dummy_nv)
+
+    with pytest.raises(ValueError, match="requires finite values"):
+        circ_fn(np.array([np.nan]), np.array([1]), dummy_idx, dummy_idx, dummy_nv)
+
+    with pytest.raises(ValueError, match="does not support complex"):
+        bip_fn(np.array([1 + 2j]), np.array([1]), dummy_idx, dummy_idx, dummy_nv)
+
+    with pytest.raises(ValueError, match="requires finite values"):
+        bip_fn(np.array([np.nan]), np.array([1]), dummy_idx, dummy_idx, dummy_nv)

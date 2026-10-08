@@ -147,8 +147,8 @@ def circular_metric(
     metric : DistanceMetric
         Callable that computes circular distance between two arrays element-wise.
     """
-    if circumference is not None and circumference <= 0:
-        raise ValueError("Circumference must be positive.")
+    if circumference is not None and (not np.isfinite(circumference) or circumference <= 0):
+        raise ValueError("Circumference must be a finite, positive number.")
 
     def _metric(
         v1: npt.NDArray[ValueScalarType],
@@ -158,7 +158,22 @@ def circular_metric(
         n_v: npt.NDArray[MetricResultScalarType],
         dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
     ) -> npt.NDArray[MetricResultScalarType]:
-        u = circumference if circumference is not None else (float(np.max(v1)) - float(np.min(v1)) + 1)
+        if np.iscomplexobj(v1) or np.iscomplexobj(v2):
+            raise ValueError("Circular metric does not support complex values.")
+        if not np.isfinite(v1).all() or not np.isfinite(v2).all():
+            raise ValueError("Circular metric requires finite values.")
+        if circumference is None:
+            is_int_1 = np.issubdtype(v1.dtype, np.integer) or (
+                np.issubdtype(v1.dtype, np.floating) and np.all(v1 % 1 == 0)  # ty:ignore[unsupported-operator]
+            )
+            is_int_2 = np.issubdtype(v2.dtype, np.integer) or (
+                np.issubdtype(v2.dtype, np.floating) and np.all(v2 % 1 == 0)  # ty:ignore[unsupported-operator]
+            )
+            if not (is_int_1 and is_int_2):
+                raise ValueError("An explicit circumference must be provided for non-integer circular data.")
+            u = float(np.max(v1)) - float(np.min(v1)) + 1
+        else:
+            u = float(circumference)
         diff = (v1 - v2).astype(dtype)  # ty:ignore[unsupported-operator]
         return (np.sin(np.pi * diff / u) ** 2).astype(dtype)
 
@@ -183,6 +198,10 @@ def bipolar_metric(
     metric : DistanceMetric
         Callable that computes bipolar distance between two arrays element-wise.
     """
+    if low is not None and not np.isfinite(low):
+        raise ValueError("low must be a finite number.")
+    if high is not None and not np.isfinite(high):
+        raise ValueError("high must be a finite number.")
     if low is not None and high is not None and low >= high:
         raise ValueError("low must be strictly less than high.")
 
@@ -194,6 +213,10 @@ def bipolar_metric(
         n_v: npt.NDArray[MetricResultScalarType],
         dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
     ) -> npt.NDArray[MetricResultScalarType]:
+        if np.iscomplexobj(v1) or np.iscomplexobj(v2):
+            raise ValueError("Bipolar metric does not support complex values.")
+        if not np.isfinite(v1).all() or not np.isfinite(v2).all():
+            raise ValueError("Bipolar metric requires finite values.")
         v_min = float(low) if low is not None else float(np.min(v1))
         v_max = float(high) if high is not None else float(np.max(v1))
         if v_min >= v_max:
