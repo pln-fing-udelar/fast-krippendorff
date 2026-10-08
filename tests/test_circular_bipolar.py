@@ -321,4 +321,3 @@ def test_non_finite_object_dtype_rejected() -> None:
 
         with pytest.raises(ValueError, match="Bipolar metric requires finite values"):
             bip_fn(obj_arr, valid_arr, dummy_idx, dummy_idx, dummy_nv)
-
