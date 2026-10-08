@@ -143,16 +143,11 @@ def _is_finite_array(arr: npt.NDArray) -> bool:
     if np.issubdtype(arr.dtype, np.number):
         return bool(np.isfinite(arr).all())
     for x in arr.flat:
-        if not isinstance(x, (numbers.Real, np.floating, np.integer)) or not math.isfinite(x):
+        if isinstance(x, (int, np.integer)):
+            continue
+        if not isinstance(x, (numbers.Real, np.floating)) or not math.isfinite(x):
             return False
     return True
-
-
-def _is_all_integer(arr: npt.NDArray) -> bool:
-    """Check if all elements of an array represent integer values."""
-    if np.issubdtype(arr.dtype, np.integer):
-        return True
-    return bool(np.all(arr.astype(float) % 1 == 0))
 
 
 def _is_all_pure_integer(arr: npt.NDArray) -> bool:
@@ -162,6 +157,16 @@ def _is_all_pure_integer(arr: npt.NDArray) -> bool:
     if arr.dtype == object:
         return all(isinstance(x, (int, np.integer)) for x in arr.flat)
     return False
+
+
+def _is_all_integer(arr: npt.NDArray) -> bool:
+    """Check if all elements of an array represent integer values."""
+    if _is_all_pure_integer(arr):
+        return True
+    try:
+        return bool(np.all(arr.astype(float) % 1 == 0))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _to_object_int(x: Any) -> Any:
@@ -183,6 +188,22 @@ def _safe_diff(a: Any, b: Any) -> Any:
             return _to_object_int(a) - _to_object_int(b)
         return np.asarray(a, dtype=np.int64) - np.asarray(b, dtype=np.int64)
     return a - b
+
+
+def _circular_diff(
+    v1: npt.NDArray,
+    v2: npt.NDArray,
+    u: Any,
+    real_dtype: np.dtype,
+) -> Any:
+    """Compute circular difference, reducing floating-point operands modulo u to avoid overflow."""
+    if _is_all_pure_integer(v1) and _is_all_pure_integer(v2) and isinstance(u, (int, np.integer)):
+        return _safe_diff(v1, v2)
+    calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
+    v1_f = np.asarray(v1, dtype=calc_dtype)
+    v2_f = np.asarray(v2, dtype=calc_dtype)
+    u_f = float(u)
+    return np.remainder(v1_f, u_f) - np.remainder(v2_f, u_f)
 
 
 def circular_metric(
@@ -224,11 +245,11 @@ def circular_metric(
             u = _safe_diff(v_max, v_min) + 1
         else:
             u = circumference
-        diff = _safe_diff(v1, v2)
+        real_dtype = np.empty((), dtype=dtype).real.dtype
+        diff = _circular_diff(v1, v2, u, real_dtype)
         diff_mod = np.remainder(diff, u)
         diff_shortest = np.where(diff_mod < u - diff_mod, diff_mod, u - diff_mod)
-        real_dtype = np.empty((), dtype=dtype).real.dtype
-        diff_scaled = np.asarray(diff_shortest, dtype=real_dtype) / float(u)
+        diff_scaled = np.asarray(diff_shortest / u, dtype=real_dtype)
         return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
     return _metric

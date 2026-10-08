@@ -449,3 +449,27 @@ def test_numeric_strings_rejected_with_value_error() -> None:
         circ_fn(s1, s2, dummy_idx, dummy_idx, dummy_nv)
     with pytest.raises(ValueError, match="Bipolar metric requires finite values"):
         bip_fn(s1, s2, dummy_idx, dummy_idx, dummy_nv)
+
+
+def test_circular_float_subtraction_overflow_prevention() -> None:
+    circ_fn = circular_metric(circumference=10.0)
+    v1 = np.array([3e38], dtype=np.float32)
+    v2 = np.array([-3e38], dtype=np.float32)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv, dtype=np.dtype(np.float32))
+    assert np.all(np.isfinite(dist))
+    # 3e38 % 10 = 2.0, -3e38 % 10 = 8.0, shortest distance = 4.0
+    expected = np.sin(np.pi * 4.0 / 10.0) ** 2
+    assert np.isclose(dist[0], expected, rtol=1e-5)
+
+
+def test_oversized_integer_finiteness_check() -> None:
+    big_int = 10**400
+    v1 = np.array([big_int], dtype=object)
+    v2 = np.array([big_int + 1], dtype=object)
+    circ_fn = circular_metric()
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.all(np.isfinite(dist))
