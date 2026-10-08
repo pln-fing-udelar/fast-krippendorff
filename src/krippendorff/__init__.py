@@ -5,6 +5,8 @@ from .krippendorff import (
     MetricResultScalarType,
     ValueScalarType,
     alpha,
+    bipolar_metric,
+    circular_metric,
 )
 
 __all__ = [
@@ -14,4 +16,6 @@ __all__ = [
     "MetricResultScalarType",
     "ValueScalarType",
     "alpha",
+    "bipolar_metric",
+    "circular_metric",
 ]

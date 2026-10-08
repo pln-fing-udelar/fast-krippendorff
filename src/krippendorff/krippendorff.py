@@ -22,6 +22,8 @@ __all__ = [
     "MetricResultScalarType",
     "ValueScalarType",
     "alpha",
+    "bipolar_metric",
+    "circular_metric",
 ]
 
 
@@ -69,7 +71,7 @@ class DistanceMetric(Protocol):
         """
 
 
-LevelOfMeasurement = Literal["nominal", "ordinal", "interval", "ratio"] | DistanceMetric
+LevelOfMeasurement = Literal["nominal", "ordinal", "interval", "ratio", "circular", "bipolar"] | DistanceMetric
 
 
 def _nominal_metric(
@@ -127,6 +129,96 @@ def _ratio_metric(
         np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0, dtype=dtype)  # ty:ignore[unsupported-operator]
         ** 2
     )
+
+
+def circular_metric(
+    circumference: float | None = None,
+) -> DistanceMetric:
+    """Distance metric factory for circular data.
+
+    Parameters
+    ----------
+    circumference : float, optional
+        Circumference U of the circular scale (period before values repeat).
+        If None, U is calculated as `max(values) - min(values) + 1` for discrete integer categories.
+
+    Returns
+    -------
+    metric : DistanceMetric
+        Callable that computes circular distance between two arrays element-wise.
+    """
+    if circumference is not None and circumference <= 0:
+        raise ValueError("Circumference must be positive.")
+
+    def _metric(
+        v1: npt.NDArray[ValueScalarType],
+        v2: npt.NDArray[ValueScalarType],
+        i1: npt.NDArray[np.int_],
+        i2: npt.NDArray[np.int_],
+        n_v: npt.NDArray[MetricResultScalarType],
+        dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
+    ) -> npt.NDArray[MetricResultScalarType]:
+        u = circumference if circumference is not None else (float(np.max(v1)) - float(np.min(v1)) + 1)
+        diff = (v1 - v2).astype(dtype)  # ty:ignore[unsupported-operator]
+        return (np.sin(np.pi * diff / u) ** 2).astype(dtype)
+
+    return _metric
+
+
+def bipolar_metric(
+    low: float | None = None,
+    high: float | None = None,
+) -> DistanceMetric:
+    """Distance metric factory for bipolar data.
+
+    Parameters
+    ----------
+    low : float, optional
+        The lowest possible value on the bipolar scale. If None, defaults to `min(values)`.
+    high : float, optional
+        The highest possible value on the bipolar scale. If None, defaults to `max(values)`.
+
+    Returns
+    -------
+    metric : DistanceMetric
+        Callable that computes bipolar distance between two arrays element-wise.
+    """
+    if low is not None and high is not None and low >= high:
+        raise ValueError("low must be strictly less than high.")
+
+    def _metric(
+        v1: npt.NDArray[ValueScalarType],
+        v2: npt.NDArray[ValueScalarType],
+        i1: npt.NDArray[np.int_],
+        i2: npt.NDArray[np.int_],
+        n_v: npt.NDArray[MetricResultScalarType],
+        dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
+    ) -> npt.NDArray[MetricResultScalarType]:
+        v_min = float(low) if low is not None else float(np.min(v1))
+        v_max = float(high) if high is not None else float(np.max(v1))
+        if v_min >= v_max:
+            raise ValueError("low must be strictly less than high.")
+        if (v1 < v_min).any() or (v1 > v_max).any() or (v2 < v_min).any() or (v2 > v_max).any():  # ty:ignore[unsupported-operator]
+            raise ValueError("The data contains out-of-bounds values for the specified bipolar endpoints.")
+
+        v1_cast = v1.astype(dtype)
+        v2_cast = v2.astype(dtype)
+        numerator = (v1_cast - v2_cast) ** 2
+        denom = (v1_cast + v2_cast - 2 * v_min) * (2 * v_max - v1_cast - v2_cast)
+        nonzero = v1 != v2
+        return np.divide(
+            numerator,
+            denom,
+            out=np.zeros(np.broadcast(v1, v2).shape, dtype=dtype),
+            where=nonzero,
+            dtype=dtype,
+        )
+
+    return _metric
+
+
+_circular_metric = circular_metric()
+_bipolar_metric = bipolar_metric()
 
 
 def _coincidences(
@@ -226,7 +318,7 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
     ----------
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of "nominal", "ordinal", "interval", "ratio", or a callable.
+        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", or a callable.
 
     Returns
     -------
@@ -238,6 +330,8 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
         "ordinal": _ordinal_metric,
         "interval": _interval_metric,
         "ratio": _ratio_metric,
+        "circular": _circular_metric,
+        "bipolar": _bipolar_metric,
     }.get(level_of_measurement, level_of_measurement)  # ty:ignore[invalid-return-type]
 
 
@@ -398,7 +492,7 @@ def _domain_from_raw_values(
     domain_set = set(domain_arr)
     if any(v not in domain_set for v in unique_vals):
         raise ValueError("The reliability data contains out-of-domain values.")
-    if level_of_measurement in ("interval", "ratio") and (
+    if level_of_measurement in ("interval", "ratio", "circular", "bipolar") and (
         np.iscomplexobj(domain_arr) or any(isinstance(v, (complex, np.complexfloating)) for v in domain_arr)
     ):
         raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
@@ -483,7 +577,7 @@ def alpha(  # noqa: C901
 
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of "nominal", "ordinal", "interval", "ratio", or a callable.
+        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", or a callable.
 
     dtype : data-type
         Result and computation data-type.
@@ -578,6 +672,14 @@ def alpha(  # noqa: C901
     ...                   value_domain=["very low", "low", "mid", "high", "very high"],
     ...                   all_reliability_data=reliability_data), 3))
     0.72
+    >>> # Circular metric example (e.g. cyclic scale 0..3):
+    >>> circ_data = [[0, 1, 2, 3], [0, 2, 2, 0]]
+    >>> print(round(alpha(circ_data, level_of_measurement="circular"), 4))
+    0.5625
+    >>> # Bipolar metric example (scale from -1 to 1):
+    >>> bip_data = [[-1, 0, 1], [-1, 1, 1]]
+    >>> print(round(alpha(bip_data, level_of_measurement="bipolar"), 4))
+    0.7826
     """
     if (reliability_data is None) == (value_counts is None):
         raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
@@ -654,7 +756,7 @@ def alpha(  # noqa: C901
     if not np.issubdtype(dtype, np.inexact):
         raise ValueError("`dtype` must be an inexact type.")
 
-    if level_of_measurement in ("interval", "ratio") and (
+    if level_of_measurement in ("interval", "ratio", "circular", "bipolar") and (
         np.iscomplexobj(value_domain) or any(isinstance(v, (complex, np.complexfloating)) for v in value_domain)
     ):
         raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
