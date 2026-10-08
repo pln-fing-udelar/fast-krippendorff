@@ -73,7 +73,7 @@ class DistanceMetric(Protocol):
         """
 
 
-LevelOfMeasurement = Literal["nominal", "ordinal", "interval", "ratio", "circular", "bipolar"] | DistanceMetric
+LevelOfMeasurement = Literal["bipolar", "circular", "interval", "nominal", "ordinal", "ratio"] | DistanceMetric
 
 
 def _nominal_metric(
@@ -393,7 +393,7 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
     ----------
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", or a callable.
+        It must be one of "bipolar", "circular", "interval", "nominal", "ordinal", "ratio", or a callable.
 
     Returns
     -------
@@ -401,12 +401,12 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
         Distance callable.
     """
     return {
+        "bipolar": _bipolar_metric,
+        "circular": _circular_metric,
+        "interval": _interval_metric,
         "nominal": _nominal_metric,
         "ordinal": _ordinal_metric,
-        "interval": _interval_metric,
         "ratio": _ratio_metric,
-        "circular": _circular_metric,
-        "bipolar": _bipolar_metric,
     }.get(level_of_measurement, level_of_measurement)  # ty:ignore[invalid-return-type]
 
 
@@ -652,7 +652,7 @@ def alpha(  # noqa: C901
 
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", or a callable.
+        It must be one of "bipolar", "circular", "interval", "nominal", "ordinal", "ratio", or a callable.
 
     dtype : data-type
         Result and computation data-type.
