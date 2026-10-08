@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import pytest
 
@@ -615,6 +617,58 @@ def test_bipolar_oversized_endpoint_with_float_data() -> None:
     bip_fn = bipolar_metric(low=0.0, high=10**400)
     v1 = np.array([1.5])
     v2 = np.array([2.5])
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+    assert dist[0] >= 0.0
+
+
+def test_circular_huge_circumference_opposite_sign_floats_no_overflow() -> None:
+    circ_fn = circular_metric(circumference=2**2000)
+    v1 = np.array([1e308])
+    v2 = np.array([-1e308])
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+    assert dist[0] >= 0.0
+
+
+def test_circular_huge_circumference_negative_oversized_integers() -> None:
+    circ_fn = circular_metric(circumference=2 * 2**2000)
+    huge = 2**2000
+    vh1 = np.array([[-huge], [-5], [0.5]], dtype=object)
+    vh2 = np.array([[0, 0, 0]], dtype=object)
+    dummy_idx = np.zeros((3, 1), dtype=int)
+    dummy_nv = np.ones((3, 1), dtype=float)
+    dist = circ_fn(vh1, vh2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist[0, 0], 1.0)
+    assert not np.isnan(dist[1, 0])
+    assert dist[1, 0] >= 0.0
+    assert not np.isnan(dist[2, 0])
+    assert dist[2, 0] >= 0.0
+
+
+def test_circular_circumference_1024_bits_overflowing_float() -> None:
+    u = int(sys.float_info.max) + 2**970
+    assert u.bit_length() == 1024
+    circ_fn = circular_metric(circumference=u)
+    v1 = np.array([1.0])
+    v2 = np.array([2.0])
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+    assert dist[0] >= 0.0
+
+
+def test_bipolar_endpoint_1024_bits_overflowing_float() -> None:
+    high = int(sys.float_info.max) + 2**970
+    assert high.bit_length() == 1024
+    bip_fn = bipolar_metric(low=0, high=high)
+    v1 = np.array([1.0])
+    v2 = np.array([2.0])
     dummy_idx = np.array([0])
     dummy_nv = np.array([1.0])
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)

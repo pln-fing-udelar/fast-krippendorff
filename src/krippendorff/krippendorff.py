@@ -232,34 +232,32 @@ def _safe_diff(a: Any, b: Any) -> Any:
     return a - b
 
 
-def _safe_divide_by_u(diff_shortest: Any, u: Any, dtype: np.dtype) -> npt.NDArray:
-    """Divide shortest circular difference by circumference u without OverflowError."""
-    if isinstance(u, (int, np.integer)) and int(u).bit_length() > 1024:
-        u_int = int(u)
-        shift = u_int.bit_length() - 53
-        u_mantissa = float(u_int >> shift)
-        diff_arr = np.asarray(diff_shortest)
-        if np.issubdtype(diff_arr.dtype, np.floating):
-            diff_scaled = np.ldexp(diff_arr, -shift) / u_mantissa
-            return np.asarray(diff_scaled, dtype=dtype)
-        out = np.zeros(diff_arr.shape, dtype=dtype)
-        for i, val in enumerate(diff_arr.flat):
-            if isinstance(val, (int, np.integer)):
-                val_int = int(val)
-                if val_int == 0:
-                    out.flat[i] = 0.0
-                    continue
-                v_bits = val_int.bit_length()
-                if v_bits > 53:
-                    v_shift = v_bits - 53
-                    v_mantissa = float(val_int >> v_shift)
-                    out.flat[i] = math.ldexp(v_mantissa / u_mantissa, v_shift - shift)
-                else:
-                    out.flat[i] = math.ldexp(float(val_int) / u_mantissa, -shift)
+def _scale_operand_by_u(arr: Any, u: int, dtype: np.dtype) -> npt.NDArray:
+    """Scale an array by a huge integer circumference u without overflow."""
+    shift = u.bit_length() - 53
+    u_mantissa = float(u >> shift)
+    arr_np = np.asarray(arr)
+    if np.issubdtype(arr_np.dtype, np.floating):
+        return np.asarray(np.ldexp(arr_np, -shift) / u_mantissa, dtype=dtype)
+    out = np.zeros(arr_np.shape, dtype=dtype)
+    for i, val in enumerate(arr_np.flat):
+        if isinstance(val, (int, np.integer)):
+            val_int = int(val)
+            if val_int == 0:
+                out.flat[i] = 0.0
+                continue
+            abs_val = abs(val_int)
+            v_bits = abs_val.bit_length()
+            sign = -1.0 if val_int < 0 else 1.0
+            if v_bits > 53:
+                v_shift = v_bits - 53
+                v_mantissa = sign * float(abs_val >> v_shift)
+                out.flat[i] = math.ldexp(v_mantissa / u_mantissa, v_shift - shift)
             else:
-                out.flat[i] = math.ldexp(float(val), -shift) / u_mantissa
-        return out
-    return np.asarray(diff_shortest / u, dtype=dtype)
+                out.flat[i] = math.ldexp(sign * float(abs_val) / u_mantissa, -shift)
+        else:
+            out.flat[i] = math.ldexp(float(val), -shift) / u_mantissa
+    return out
 
 
 def _circular_diff(
@@ -276,8 +274,6 @@ def _circular_diff(
     calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
     v1_f = np.asarray(v1, dtype=calc_dtype)
     v2_f = np.asarray(v2, dtype=calc_dtype)
-    if isinstance(u, (int, np.integer)) and int(u).bit_length() > 1024:
-        return v1_f - v2_f
     u_f = float(u)
     return np.remainder(v1_f, u_f) - np.remainder(v2_f, u_f)
 
@@ -341,13 +337,17 @@ def circular_metric(
             u = circumference
         u = _to_int_if_integral(u)
         real_dtype = np.empty((), dtype=dtype).real.dtype
-        diff = _circular_diff(v1, v2, u, real_dtype)
-        if isinstance(u, (int, np.integer)) and int(u).bit_length() > 1024:
-            diff_shortest = np.abs(diff)
+        if isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024:
+            u_int = int(u)
+            s1 = _scale_operand_by_u(v1, u_int, real_dtype)
+            s2 = _scale_operand_by_u(v2, u_int, real_dtype)
+            diff_mod = np.abs(s1 - s2) % 1.0
+            diff_scaled = np.where(diff_mod < 1.0 - diff_mod, diff_mod, 1.0 - diff_mod)
         else:
+            diff = _circular_diff(v1, v2, u, real_dtype)
             diff_mod = np.remainder(diff, u)
             diff_shortest = np.where(diff_mod < u - diff_mod, diff_mod, u - diff_mod)
-        diff_scaled = _safe_divide_by_u(diff_shortest, u, real_dtype)
+            diff_scaled = np.asarray(diff_shortest / u, dtype=real_dtype)
         return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
     return _metric
@@ -360,7 +360,7 @@ def _frexp_val(val: Any) -> tuple[float, int]:
         if val_int == 0:
             return 0.0, 0
         bits = val_int.bit_length()
-        if bits > 1024:
+        if bits >= 1024:
             shift = bits - 53
             m = float(abs(val_int) >> shift)
             if val_int < 0:
@@ -467,7 +467,7 @@ def _normalize_endpoint(val: Any, name: str) -> Any:
 
 def _val_less_than(arr: npt.NDArray, bound: Any) -> bool:
     """Check if any element in arr is strictly less than bound, avoiding OverflowError."""
-    if isinstance(bound, (int, np.integer)) and int(bound).bit_length() > 1024:
+    if isinstance(bound, (int, np.integer)) and int(bound).bit_length() >= 1024:
         bound_int = int(bound)
         if bound_int > 0:
             if arr.dtype == object:
@@ -485,7 +485,7 @@ def _val_less_than(arr: npt.NDArray, bound: Any) -> bool:
 
 def _val_greater_than(arr: npt.NDArray, bound: Any) -> bool:
     """Check if any element in arr is strictly greater than bound, avoiding OverflowError."""
-    if isinstance(bound, (int, np.integer)) and int(bound).bit_length() > 1024:
+    if isinstance(bound, (int, np.integer)) and int(bound).bit_length() >= 1024:
         bound_int = int(bound)
         if bound_int > 0:
             if arr.dtype == object:
