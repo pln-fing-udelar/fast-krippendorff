@@ -674,3 +674,70 @@ def test_bipolar_endpoint_1024_bits_overflowing_float() -> None:
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert not np.isnan(dist[0])
     assert dist[0] >= 0.0
+
+
+def test_circular_mixed_domain_preserves_integer_differences() -> None:
+    circ_fn = circular_metric(circumference=4)
+    domain = np.array([0.5, 2**53, 2**53 + 1], dtype=object)
+    v1 = domain[:, None]
+    v2 = domain[None, :]
+    dummy_idx = np.zeros(v1.shape, dtype=int)
+    dummy_nv = np.ones(v1.shape, dtype=float)
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist[1, 2], 0.5)
+    assert np.isclose(dist[2, 1], 0.5)
+    assert dist[0, 1] > 0.0
+    assert dist[0, 2] > 0.0
+
+
+def test_circular_huge_operands_small_difference_precision() -> None:
+    u = 2**2001
+    c = 2**2000
+    k = c + 2**1900
+    circ_fn = circular_metric(circumference=u)
+    v1 = np.array([c], dtype=object)
+    v2 = np.array([k], dtype=object)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    expected = np.sin(np.pi * 2**-101) ** 2
+    assert dist[0] > 0.0
+    assert np.isclose(dist[0], expected)
+
+
+def test_circular_mixed_domain_huge_circumference() -> None:
+    u = 2**2001
+    c = 2**2000
+    k = c + 2**1900
+    circ_fn = circular_metric(circumference=u)
+    domain = np.array([0.5, c, k], dtype=object)
+    v1 = domain[:, None]
+    v2 = domain[None, :]
+    dummy_idx = np.zeros(v1.shape, dtype=int)
+    dummy_nv = np.ones(v1.shape, dtype=float)
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert dist[1, 2] > 0.0
+    assert dist[0, 1] > 0.0
+    assert not np.isnan(dist[0, 1])
+
+
+def test_bipolar_mixed_domain_fractional_endpoint_preserves_integer_differences() -> None:
+    bip_fn = bipolar_metric(low=0.5, high=2**54)
+    v1 = np.array([2**53], dtype=object)
+    v2 = np.array([2**53 + 1], dtype=object)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+    assert dist[0] > 0.0
+
+
+def test_bipolar_oversized_integers_in_mixed_domain() -> None:
+    bip_fn = bipolar_metric(low=0.5, high=2**2001)
+    v1 = np.array([2**2000], dtype=object)
+    v2 = np.array([2**2000 + 2**1900], dtype=object)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+    assert dist[0] > 0.0

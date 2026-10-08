@@ -232,6 +232,27 @@ def _safe_diff(a: Any, b: Any) -> Any:
     return a - b
 
 
+def _scale_val(val: Any, u: int) -> float:
+    """Scale a single scalar val by huge circumference u."""
+    if isinstance(val, (int, np.integer)):
+        val_int = int(val)
+        if val_int == 0:
+            return 0.0
+        shift = u.bit_length() - 53
+        u_mantissa = float(u >> shift)
+        abs_v = abs(val_int)
+        v_bits = abs_v.bit_length()
+        sign = -1.0 if val_int < 0 else 1.0
+        if v_bits > 53:
+            v_shift = v_bits - 53
+            v_m = sign * float(abs_v >> v_shift)
+            return math.ldexp(v_m / u_mantissa, v_shift - shift)
+        return math.ldexp(sign * float(abs_v) / u_mantissa, -shift)
+    shift = u.bit_length() - 53
+    u_mantissa = float(u >> shift)
+    return math.ldexp(float(val), -shift) / u_mantissa
+
+
 def _scale_operand_by_u(arr: Any, u: int, dtype: np.dtype) -> npt.NDArray:
     """Scale an array by a huge integer circumference u without overflow."""
     shift = u.bit_length() - 53
@@ -241,41 +262,79 @@ def _scale_operand_by_u(arr: Any, u: int, dtype: np.dtype) -> npt.NDArray:
         return np.asarray(np.ldexp(arr_np, -shift) / u_mantissa, dtype=dtype)
     out = np.zeros(arr_np.shape, dtype=dtype)
     for i, val in enumerate(arr_np.flat):
-        if isinstance(val, (int, np.integer)):
-            val_int = int(val)
-            if val_int == 0:
-                out.flat[i] = 0.0
-                continue
-            abs_val = abs(val_int)
-            v_bits = abs_val.bit_length()
-            sign = -1.0 if val_int < 0 else 1.0
-            if v_bits > 53:
-                v_shift = v_bits - 53
-                v_mantissa = sign * float(abs_val >> v_shift)
-                out.flat[i] = math.ldexp(v_mantissa / u_mantissa, v_shift - shift)
-            else:
-                out.flat[i] = math.ldexp(sign * float(abs_val) / u_mantissa, -shift)
-        else:
-            out.flat[i] = math.ldexp(float(val), -shift) / u_mantissa
+        out.flat[i] = _scale_val(val, u)
     return out
 
 
-def _circular_diff(
+def _circular_scaled_diff(
     v1: npt.NDArray,
     v2: npt.NDArray,
     u: Any,
     real_dtype: np.dtype,
-) -> Any:
-    """Compute circular difference, reducing floating-point operands modulo u to avoid overflow."""
-    v1_norm = _to_pure_integer_if_all_integral(v1)
-    v2_norm = _to_pure_integer_if_all_integral(v2)
-    if _is_all_pure_integer(v1_norm) and _is_all_pure_integer(v2_norm):
-        return _safe_diff(v1_norm, v2_norm)
-    calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
-    v1_f = np.asarray(v1, dtype=calc_dtype)
-    v2_f = np.asarray(v2, dtype=calc_dtype)
-    u_f = float(u)
-    return np.remainder(v1_f, u_f) - np.remainder(v2_f, u_f)
+) -> npt.NDArray:
+    """Compute normalized shortest circular difference |v1 - v2|_circ / u in [0, 0.5]."""
+    is_pure_int = _is_all_pure_integer(v1) and _is_all_pure_integer(v2)
+    if is_pure_int:
+        diff = _safe_diff(v1, v2)
+        if isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024:
+            u_int = int(u)
+            diff_mod = np.remainder(diff, u_int)
+            diff_short = np.where(diff_mod < u_int - diff_mod, diff_mod, u_int - diff_mod)
+            return _scale_operand_by_u(diff_short, u_int, real_dtype)
+        u_val = u if isinstance(u, (int, np.integer)) else float(u)
+        diff_mod = np.remainder(diff, u_val)
+        diff_short = np.where(diff_mod < u_val - diff_mod, diff_mod, u_val - diff_mod)
+        return np.asarray(diff_short / u_val, dtype=real_dtype)
+
+    is_pure_float = np.issubdtype(v1.dtype, np.floating) and np.issubdtype(v2.dtype, np.floating)
+    if is_pure_float:
+        if isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024:
+            u_int = int(u)
+            s1 = _scale_operand_by_u(v1, u_int, real_dtype)
+            s2 = _scale_operand_by_u(v2, u_int, real_dtype)
+            diff_mod = np.abs(s1 - s2) % 1.0
+            return np.where(diff_mod < 1.0 - diff_mod, diff_mod, 1.0 - diff_mod)
+        calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
+        u_f = float(u)
+        diff = np.remainder(np.asarray(v1, dtype=calc_dtype), u_f) - np.remainder(np.asarray(v2, dtype=calc_dtype), u_f)
+        diff_mod = np.remainder(diff, u_f)
+        diff_short = np.where(diff_mod < u_f - diff_mod, diff_mod, u_f - diff_mod)
+        return np.asarray(diff_short / u_f, dtype=real_dtype)
+
+    out_shape = np.broadcast(v1, v2).shape
+    out = np.zeros(out_shape, dtype=real_dtype)
+    b_v1, b_v2 = np.broadcast_arrays(v1, v2)
+    for idx in np.ndindex(out_shape):
+        a = b_v1[idx]
+        b = b_v2[idx]
+        if isinstance(a, (int, np.integer)) and isinstance(b, (int, np.integer)):
+            diff = int(a) - int(b)
+            if isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024:
+                u_int = int(u)
+                diff_mod = diff % u_int
+                diff_short = min(diff_mod, u_int - diff_mod)
+                out[idx] = _scale_val(diff_short, u_int)
+            else:
+                diff_mod = diff % u
+                diff_short = min(diff_mod, u - diff_mod)
+                out[idx] = diff_short / u
+        else:
+            if isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024:
+                u_int = int(u)
+                s1 = _scale_val(a, u_int)
+                s2 = _scale_val(b, u_int)
+                diff_mod = abs(s1 - s2) % 1.0
+                out[idx] = min(diff_mod, 1.0 - diff_mod)
+            else:
+                u_f = float(u)
+                u_is_int = isinstance(u, (int, np.integer))
+                a_val = float(int(a) % int(u)) if (isinstance(a, (int, np.integer)) and u_is_int) else float(a)
+                b_val = float(int(b) % int(u)) if (isinstance(b, (int, np.integer)) and u_is_int) else float(b)
+                diff = (a_val % u_f) - (b_val % u_f)
+                diff_mod = diff % u_f
+                diff_short = min(diff_mod, u_f - diff_mod)
+                out[idx] = diff_short / u_f
+    return out
 
 
 def _normalize_circumference(circumference: float | None) -> Any:
@@ -337,17 +396,7 @@ def circular_metric(
             u = circumference
         u = _to_int_if_integral(u)
         real_dtype = np.empty((), dtype=dtype).real.dtype
-        if isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024:
-            u_int = int(u)
-            s1 = _scale_operand_by_u(v1, u_int, real_dtype)
-            s2 = _scale_operand_by_u(v2, u_int, real_dtype)
-            diff_mod = np.abs(s1 - s2) % 1.0
-            diff_scaled = np.where(diff_mod < 1.0 - diff_mod, diff_mod, 1.0 - diff_mod)
-        else:
-            diff = _circular_diff(v1, v2, u, real_dtype)
-            diff_mod = np.remainder(diff, u)
-            diff_shortest = np.where(diff_mod < u - diff_mod, diff_mod, u - diff_mod)
-            diff_scaled = np.asarray(diff_shortest / u, dtype=real_dtype)
+        diff_scaled = _circular_scaled_diff(v1, v2, u, real_dtype)
         return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
     return _metric
@@ -368,6 +417,31 @@ def _frexp_val(val: Any) -> tuple[float, int]:
             return math.ldexp(m, -53), bits
     val_f = float(val)
     return math.frexp(val_f)
+
+
+def _scale_val_by_exp(val: Any, exp: int) -> float:
+    """Scale a scalar val by 2**(-exp)."""
+    m, e = _frexp_val(val)
+    return math.ldexp(m, e - exp)
+
+
+def _scale_bipolar_array(arr: Any, exp: int, dtype: np.dtype) -> npt.NDArray:
+    """Scale an array by 2**(-exp) without overflow."""
+    arr_np = np.asarray(arr)
+    if np.issubdtype(arr_np.dtype, np.floating) or np.issubdtype(arr_np.dtype, np.integer):
+        return np.asarray(np.ldexp(arr_np.astype(dtype), -exp), dtype=dtype)
+    out = np.zeros(arr_np.shape, dtype=dtype)
+    for i, val in enumerate(arr_np.flat):
+        out.flat[i] = _scale_val_by_exp(val, exp)
+    return out
+
+
+def _max_exp_arr(arr: npt.NDArray) -> int:
+    """Compute maximum binary exponent across array elements."""
+    if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype, np.integer):
+        max_v = float(np.max(np.abs(arr)))
+        return math.frexp(max_v)[1] if max_v > 0 else 0
+    return max((_frexp_val(x)[1] for x in arr.flat), default=0)
 
 
 def _bipolar_terms(
@@ -411,30 +485,27 @@ def _bipolar_terms(
             np.asarray(ratio2, dtype=calc_dtype),
         )
 
-    v1_f = np.asarray(v1, dtype=calc_dtype)
-    v2_f = np.asarray(v2, dtype=calc_dtype)
     min_m, min_exp = _frexp_val(v_min)
     max_m, max_exp = _frexp_val(v_max)
-    max_v = max(float(np.max(np.abs(v1_f))), float(np.max(np.abs(v2_f))))
-    _, max_v_exp = math.frexp(max_v) if max_v > 0 else (0.0, 0)
+    calc_dt = np.dtype(calc_dtype)
+    max_v_exp = max(_max_exp_arr(v1), _max_exp_arr(v2))
 
     exp1 = max(min_exp, max_v_exp)
-    v1_1 = np.ldexp(v1_f, -exp1)
-    v2_1 = np.ldexp(v2_f, -exp1)
+    v1_1 = _scale_bipolar_array(v1, exp1, calc_dt)
+    v2_1 = _scale_bipolar_array(v2, exp1, calc_dt)
     min_1 = math.ldexp(min_m, min_exp - exp1)
     term1_f = (v1_1 - min_1) + (v2_1 - min_1)
 
     exp2 = max(max_exp, max_v_exp)
-    v1_2 = np.ldexp(v1_f, -exp2)
-    v2_2 = np.ldexp(v2_f, -exp2)
+    v1_2 = _scale_bipolar_array(v1, exp2, calc_dt)
+    v2_2 = _scale_bipolar_array(v2, exp2, calc_dt)
     max_2 = math.ldexp(max_m, max_exp - exp2)
     term2_f = (max_2 - v1_2) + (max_2 - v2_2)
 
     if not (np.issubdtype(np.asarray(v1).dtype, np.floating) and np.issubdtype(np.asarray(v2).dtype, np.floating)):
         diff = _safe_diff(v1, v2)
-        diff_arr = np.asarray(diff, dtype=calc_dtype)
-        diff_1 = np.ldexp(diff_arr, -exp1)
-        diff_2 = np.ldexp(diff_arr, -exp2)
+        diff_1 = _scale_bipolar_array(diff, exp1, calc_dt)
+        diff_2 = _scale_bipolar_array(diff, exp2, calc_dt)
     else:
         diff_1 = v1_1 - v2_1
         diff_2 = v1_2 - v2_2
