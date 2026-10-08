@@ -396,3 +396,35 @@ def test_int64_min_max_span_overflow_prevention() -> None:
     bip_fn = bipolar_metric()
     dist_bip = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert np.allclose(dist_bip, 1.0)
+
+
+def test_bipolar_extreme_scale_no_nan() -> None:
+    bip_fn = bipolar_metric()
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    v1 = np.array([-1e200])
+    v2 = np.array([1e200])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.all(np.isfinite(dist))
+    assert np.allclose(dist, 1.0)
+
+
+def test_numeric_strings_rejected_with_value_error() -> None:
+    data = [["1", "2"], ["1", "2"]]
+    domain = ["1", "2"]
+    with pytest.raises(ValueError, match="Circular metric requires finite values"):
+        alpha(data, level_of_measurement="circular", value_domain=domain)
+
+    with pytest.raises(ValueError, match="Bipolar metric requires finite values"):
+        alpha(data, level_of_measurement="bipolar", value_domain=domain)
+
+    circ_fn = circular_metric()
+    bip_fn = bipolar_metric()
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    s1 = np.array(["1", "2"])
+    s2 = np.array(["2", "3"])
+    with pytest.raises(ValueError, match="Circular metric requires finite values"):
+        circ_fn(s1, s2, dummy_idx, dummy_idx, dummy_nv)
+    with pytest.raises(ValueError, match="Bipolar metric requires finite values"):
+        bip_fn(s1, s2, dummy_idx, dummy_idx, dummy_nv)

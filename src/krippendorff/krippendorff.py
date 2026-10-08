@@ -7,6 +7,8 @@ For more information, see: https://en.wikipedia.org/wiki/Krippendorff%27s_alpha
 The module naming follows the one from the Wikipedia link.
 """
 
+import math
+import numbers
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Protocol, TypeVar
 
@@ -137,13 +139,13 @@ def _has_complex(arr: npt.NDArray) -> bool:
 
 
 def _is_finite_array(arr: npt.NDArray) -> bool:
-    """Check if an array contains exclusively finite numeric values."""
-    try:
-        if np.issubdtype(arr.dtype, np.number):
-            return bool(np.isfinite(arr).all())
-        return bool(np.isfinite(arr.astype(float)).all())
-    except (TypeError, ValueError):
-        return False
+    """Check if an array contains exclusively finite real numeric values."""
+    if np.issubdtype(arr.dtype, np.number):
+        return bool(np.isfinite(arr).all())
+    for x in arr.flat:
+        if not isinstance(x, (numbers.Real, np.floating, np.integer)) or not math.isfinite(x):
+            return False
+    return True
 
 
 def _is_all_integer(arr: npt.NDArray) -> bool:
@@ -273,15 +275,19 @@ def bipolar_metric(
         diff_f = np.asarray(diff, dtype=real_dtype)
         term1_f = np.asarray(term1, dtype=real_dtype)
         term2_f = np.asarray(term2, dtype=real_dtype)
-        num = diff_f**2
-        denom = term1_f * term2_f
-        res = np.divide(
-            num,
-            denom,
+        ratio1 = np.divide(
+            diff_f,
+            term1_f,
             out=np.zeros(np.broadcast(v1, v2).shape, dtype=real_dtype),
             where=nonzero,
         )
-        return res.astype(dtype)
+        ratio2 = np.divide(
+            diff_f,
+            term2_f,
+            out=np.zeros(np.broadcast(v1, v2).shape, dtype=real_dtype),
+            where=nonzero,
+        )
+        return (ratio1 * ratio2).astype(dtype)
 
     return _metric
 
