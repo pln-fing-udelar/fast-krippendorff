@@ -234,9 +234,10 @@ def _safe_diff(a: Any, b: Any) -> Any:
 
 def _safe_divide_by_u(diff_shortest: Any, u: Any, dtype: np.dtype) -> npt.NDArray:
     """Divide shortest circular difference by circumference u without OverflowError."""
-    if isinstance(u, (int, np.integer)) and u.bit_length() > 1024:
-        shift = u.bit_length() - 53
-        u_mantissa = float(u >> shift)
+    if isinstance(u, (int, np.integer)) and int(u).bit_length() > 1024:
+        u_int = int(u)
+        shift = u_int.bit_length() - 53
+        u_mantissa = float(u_int >> shift)
         diff_arr = np.asarray(diff_shortest)
         if np.issubdtype(diff_arr.dtype, np.floating):
             diff_scaled = np.ldexp(diff_arr, -shift) / u_mantissa
@@ -244,8 +245,17 @@ def _safe_divide_by_u(diff_shortest: Any, u: Any, dtype: np.dtype) -> npt.NDArra
         out = np.zeros(diff_arr.shape, dtype=dtype)
         for i, val in enumerate(diff_arr.flat):
             if isinstance(val, (int, np.integer)):
-                val_mantissa = float(val >> shift) if val.bit_length() > shift else math.ldexp(float(val), -shift)
-                out.flat[i] = val_mantissa / u_mantissa
+                val_int = int(val)
+                if val_int == 0:
+                    out.flat[i] = 0.0
+                    continue
+                v_bits = val_int.bit_length()
+                if v_bits > 53:
+                    v_shift = v_bits - 53
+                    v_mantissa = float(val_int >> v_shift)
+                    out.flat[i] = math.ldexp(v_mantissa / u_mantissa, v_shift - shift)
+                else:
+                    out.flat[i] = math.ldexp(float(val_int) / u_mantissa, -shift)
             else:
                 out.flat[i] = math.ldexp(float(val), -shift) / u_mantissa
         return out
@@ -266,7 +276,7 @@ def _circular_diff(
     calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
     v1_f = np.asarray(v1, dtype=calc_dtype)
     v2_f = np.asarray(v2, dtype=calc_dtype)
-    if isinstance(u, (int, np.integer)) and u.bit_length() > 1024:
+    if isinstance(u, (int, np.integer)) and int(u).bit_length() > 1024:
         return v1_f - v2_f
     u_f = float(u)
     return np.remainder(v1_f, u_f) - np.remainder(v2_f, u_f)
@@ -332,7 +342,7 @@ def circular_metric(
         u = _to_int_if_integral(u)
         real_dtype = np.empty((), dtype=dtype).real.dtype
         diff = _circular_diff(v1, v2, u, real_dtype)
-        if isinstance(u, (int, np.integer)) and u.bit_length() > 1024:
+        if isinstance(u, (int, np.integer)) and int(u).bit_length() > 1024:
             diff_shortest = np.abs(diff)
         else:
             diff_mod = np.remainder(diff, u)
@@ -341,6 +351,23 @@ def circular_metric(
         return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
     return _metric
+
+
+def _frexp_val(val: Any) -> tuple[float, int]:
+    """Return (mantissa, exponent) such that val == mantissa * 2**exponent."""
+    if isinstance(val, (int, np.integer)):
+        val_int = int(val)
+        if val_int == 0:
+            return 0.0, 0
+        bits = val_int.bit_length()
+        if bits > 1024:
+            shift = bits - 53
+            m = float(abs(val_int) >> shift)
+            if val_int < 0:
+                m = -m
+            return math.ldexp(m, -53), bits
+    val_f = float(val)
+    return math.frexp(val_f)
 
 
 def _bipolar_terms(
@@ -386,26 +413,21 @@ def _bipolar_terms(
 
     v1_f = np.asarray(v1, dtype=calc_dtype)
     v2_f = np.asarray(v2, dtype=calc_dtype)
-    min_f = float(v_min)
-    max_f = float(v_max)
+    min_m, min_exp = _frexp_val(v_min)
+    max_m, max_exp = _frexp_val(v_max)
     max_v = max(float(np.max(np.abs(v1_f))), float(np.max(np.abs(v2_f))))
+    _, max_v_exp = math.frexp(max_v) if max_v > 0 else (0.0, 0)
 
-    max_abs1 = max(abs(min_f), max_v)
-    exp1 = 0
-    if max_abs1 > 0:
-        _, exp1 = math.frexp(max_abs1)
+    exp1 = max(min_exp, max_v_exp)
     v1_1 = np.ldexp(v1_f, -exp1)
     v2_1 = np.ldexp(v2_f, -exp1)
-    min_1 = math.ldexp(min_f, -exp1)
+    min_1 = math.ldexp(min_m, min_exp - exp1)
     term1_f = (v1_1 - min_1) + (v2_1 - min_1)
 
-    max_abs2 = max(abs(max_f), max_v)
-    exp2 = 0
-    if max_abs2 > 0:
-        _, exp2 = math.frexp(max_abs2)
+    exp2 = max(max_exp, max_v_exp)
     v1_2 = np.ldexp(v1_f, -exp2)
     v2_2 = np.ldexp(v2_f, -exp2)
-    max_2 = math.ldexp(max_f, -exp2)
+    max_2 = math.ldexp(max_m, max_exp - exp2)
     term2_f = (max_2 - v1_2) + (max_2 - v2_2)
 
     if not (np.issubdtype(np.asarray(v1).dtype, np.floating) and np.issubdtype(np.asarray(v2).dtype, np.floating)):
@@ -441,6 +463,42 @@ def _normalize_endpoint(val: Any, name: str) -> Any:
     if not (isinstance(val, (numbers.Real, np.floating)) and np.isfinite(val)):
         raise ValueError(f"{name} must be a finite number.")
     return _to_int_if_integral(val)
+
+
+def _val_less_than(arr: npt.NDArray, bound: Any) -> bool:
+    """Check if any element in arr is strictly less than bound, avoiding OverflowError."""
+    if isinstance(bound, (int, np.integer)) and int(bound).bit_length() > 1024:
+        bound_int = int(bound)
+        if bound_int > 0:
+            if arr.dtype == object:
+                return any(x < bound_int for x in arr.flat)
+            return True
+        else:
+            if arr.dtype == object:
+                return any(x < bound_int for x in arr.flat)
+            return False
+    try:
+        return bool((arr < bound).any())
+    except OverflowError:
+        return any(x < bound for x in arr.flat)
+
+
+def _val_greater_than(arr: npt.NDArray, bound: Any) -> bool:
+    """Check if any element in arr is strictly greater than bound, avoiding OverflowError."""
+    if isinstance(bound, (int, np.integer)) and int(bound).bit_length() > 1024:
+        bound_int = int(bound)
+        if bound_int > 0:
+            if arr.dtype == object:
+                return any(x > bound_int for x in arr.flat)
+            return False
+        else:
+            if arr.dtype == object:
+                return any(x > bound_int for x in arr.flat)
+            return True
+    try:
+        return bool((arr > bound).any())
+    except OverflowError:
+        return any(x > bound for x in arr.flat)
 
 
 def bipolar_metric(
@@ -486,7 +544,12 @@ def bipolar_metric(
         v_max = _to_int_if_integral(v_max)
         if v_min >= v_max:
             raise ValueError("low must be strictly less than high.")
-        if (v1 < v_min).any() or (v1 > v_max).any() or (v2 < v_min).any() or (v2 > v_max).any():
+        if (
+            _val_less_than(v1, v_min)
+            or _val_greater_than(v1, v_max)
+            or _val_less_than(v2, v_min)
+            or _val_greater_than(v2, v_max)
+        ):
             raise ValueError("The data contains out-of-bounds values for the specified bipolar endpoints.")
 
         real_dtype = np.empty((), dtype=dtype).real.dtype

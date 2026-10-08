@@ -598,3 +598,25 @@ def test_circular_huge_circumference_non_integer_data() -> None:
     dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert not np.isnan(dist[0])
     assert dist[0] >= 0.0
+
+
+def test_circular_numpy_integer_array_huge_circumference() -> None:
+    circ_fn = circular_metric(circumference=2**2000)
+    v1 = np.array([0], dtype=np.int64)
+    v2 = np.array([1], dtype=np.int64)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+    assert dist[0] >= 0.0
+
+
+def test_bipolar_oversized_endpoint_with_float_data() -> None:
+    bip_fn = bipolar_metric(low=0.0, high=10**400)
+    v1 = np.array([1.5])
+    v2 = np.array([2.5])
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+    assert dist[0] >= 0.0
