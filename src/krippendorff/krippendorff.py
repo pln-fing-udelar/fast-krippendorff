@@ -139,9 +139,18 @@ def _has_complex(arr: npt.NDArray) -> bool:
 def _is_finite_array(arr: npt.NDArray) -> bool:
     """Check if an array contains exclusively finite numeric values."""
     try:
-        return bool(np.isfinite(arr).all())
+        if np.issubdtype(arr.dtype, np.number):
+            return bool(np.isfinite(arr).all())
+        return bool(np.isfinite(arr.astype(float)).all())
     except (TypeError, ValueError):
         return False
+
+
+def _is_all_integer(arr: npt.NDArray) -> bool:
+    """Check if all elements of an array represent integer values."""
+    if np.issubdtype(arr.dtype, np.integer):
+        return True
+    return bool(np.all(arr.astype(float) % 1 == 0))
 
 
 def circular_metric(
@@ -178,16 +187,10 @@ def circular_metric(
         v1_cast = v1.astype(dtype)
         v2_cast = v2.astype(dtype)
         if circumference is None:
-            is_int_1 = np.issubdtype(v1.dtype, np.integer) or (
-                np.issubdtype(v1.dtype, np.floating) and np.all(v1 % 1 == 0)  # ty:ignore[unsupported-operator]
-            )
-            is_int_2 = np.issubdtype(v2.dtype, np.integer) or (
-                np.issubdtype(v2.dtype, np.floating) and np.all(v2 % 1 == 0)  # ty:ignore[unsupported-operator]
-            )
-            if not (is_int_1 and is_int_2):
+            if not (_is_all_integer(v1) and _is_all_integer(v2)):
                 raise ValueError("An explicit circumference must be provided for non-integer circular data.")
-            v_min = min(float(np.min(v1)), float(np.min(v2)))
-            v_max = max(float(np.max(v1)), float(np.max(v2)))
+            v_min = min(float(np.min(v1_cast)), float(np.min(v2_cast)))
+            v_max = max(float(np.max(v1_cast)), float(np.max(v2_cast)))
             u = v_max - v_min + 1
         else:
             u = float(circumference)
@@ -234,22 +237,22 @@ def bipolar_metric(
             raise ValueError("Bipolar metric does not support complex values.")
         if not _is_finite_array(v1) or not _is_finite_array(v2):
             raise ValueError("Bipolar metric requires finite values.")
-        v_min = float(low) if low is not None else min(float(np.min(v1)), float(np.min(v2)))
-        v_max = float(high) if high is not None else max(float(np.max(v1)), float(np.max(v2)))
-        if v_min >= v_max:
-            raise ValueError("low must be strictly less than high.")
-        if (v1 < v_min).any() or (v1 > v_max).any() or (v2 < v_min).any() or (v2 > v_max).any():  # ty:ignore[unsupported-operator]
-            raise ValueError("The data contains out-of-bounds values for the specified bipolar endpoints.")
-
         v1_cast = v1.astype(dtype)
         v2_cast = v2.astype(dtype)
+        v_min = float(low) if low is not None else min(float(np.min(v1_cast)), float(np.min(v2_cast)))
+        v_max = float(high) if high is not None else max(float(np.max(v1_cast)), float(np.max(v2_cast)))
+        if v_min >= v_max:
+            raise ValueError("low must be strictly less than high.")
+        if (v1_cast < v_min).any() or (v1_cast > v_max).any() or (v2_cast < v_min).any() or (v2_cast > v_max).any():
+            raise ValueError("The data contains out-of-bounds values for the specified bipolar endpoints.")
+
         numerator = (v1_cast - v2_cast) ** 2
         denom = (v1_cast + v2_cast - 2 * v_min) * (2 * v_max - v1_cast - v2_cast)
-        nonzero = v1 != v2
+        nonzero = v1_cast != v2_cast
         return np.divide(
             numerator,
             denom,
-            out=np.zeros(np.broadcast(v1, v2).shape, dtype=dtype),
+            out=np.zeros(np.broadcast(v1_cast, v2_cast).shape, dtype=dtype),
             where=nonzero,
             dtype=dtype,
         )

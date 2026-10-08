@@ -269,3 +269,56 @@ def test_object_dtype_complex_values_rejected() -> None:
 
     with pytest.raises(ValueError, match="does not support complex"):
         alpha(reliability_data=data, value_domain=complex_domain, level_of_measurement=bip_fn)
+
+
+def test_numeric_object_dtype_domain_and_operands_supported() -> None:
+    data_circ = [
+        [0, 1, 2, 3],
+        [0, 2, 2, 0],
+    ]
+    domain_circ = np.array([0, 1, 2, 3], dtype=object)
+    res_circ_str = alpha(data_circ, level_of_measurement="circular", value_domain=domain_circ)
+    res_circ_fn = alpha(data_circ, level_of_measurement=circular_metric(), value_domain=domain_circ)
+    assert round(res_circ_str, 6) == 0.5625
+    assert round(res_circ_fn, 6) == 0.5625
+
+    data_bip = [
+        [-1, 0, 1],
+        [-1, 1, 1],
+    ]
+    domain_bip = np.array([-1, 0, 1], dtype=object)
+    res_bip_str = alpha(data_bip, level_of_measurement="bipolar", value_domain=domain_bip)
+    res_bip_fn = alpha(data_bip, level_of_measurement=bipolar_metric(), value_domain=domain_bip)
+    assert np.isfinite(res_bip_str)
+    assert np.isfinite(res_bip_fn)
+    assert res_bip_str == res_bip_fn
+
+    # Direct metric invocation with object arrays
+    circ_fn = circular_metric()
+    bip_fn = bipolar_metric()
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    o1 = np.array([0, 2], dtype=object)
+    o2 = np.array([1, 2], dtype=object)
+    d_circ = circ_fn(o1, o2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.all(np.isfinite(d_circ))
+    d_bip = bip_fn(o1, o2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.all(np.isfinite(d_bip))
+
+
+def test_non_finite_object_dtype_rejected() -> None:
+    circ_fn = circular_metric(4)
+    bip_fn = bipolar_metric(-1, 1)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+
+    for invalid_val in [np.nan, np.inf, -np.inf, "not-a-number", None]:
+        obj_arr = np.array([invalid_val], dtype=object)
+        valid_arr = np.array([1.0], dtype=object)
+
+        with pytest.raises(ValueError, match="Circular metric requires finite values"):
+            circ_fn(obj_arr, valid_arr, dummy_idx, dummy_idx, dummy_nv)
+
+        with pytest.raises(ValueError, match="Bipolar metric requires finite values"):
+            bip_fn(obj_arr, valid_arr, dummy_idx, dummy_idx, dummy_nv)
+
