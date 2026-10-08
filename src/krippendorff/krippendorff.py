@@ -225,11 +225,31 @@ def _safe_diff(a: Any, b: Any) -> Any:
     b_arr = np.asarray(b)
     if np.issubdtype(a_arr.dtype, np.floating) or np.issubdtype(b_arr.dtype, np.floating):
         return a - b
-    if np.issubdtype(a_arr.dtype, np.integer) or np.issubdtype(b_arr.dtype, np.integer):
+    if np.issubdtype(a_arr.dtype, np.integer) and np.issubdtype(b_arr.dtype, np.integer):
         if a_arr.dtype in (np.int64, np.uint64) or b_arr.dtype in (np.int64, np.uint64):
             return _to_object_int(a) - _to_object_int(b)
         return np.asarray(a, dtype=np.int64) - np.asarray(b, dtype=np.int64)
     return a - b
+
+
+def _safe_divide_by_u(diff_shortest: Any, u: Any, dtype: np.dtype) -> npt.NDArray:
+    """Divide shortest circular difference by circumference u without OverflowError."""
+    if isinstance(u, (int, np.integer)) and u.bit_length() > 1024:
+        shift = u.bit_length() - 53
+        u_mantissa = float(u >> shift)
+        diff_arr = np.asarray(diff_shortest)
+        if np.issubdtype(diff_arr.dtype, np.floating):
+            diff_scaled = np.ldexp(diff_arr, -shift) / u_mantissa
+            return np.asarray(diff_scaled, dtype=dtype)
+        out = np.zeros(diff_arr.shape, dtype=dtype)
+        for i, val in enumerate(diff_arr.flat):
+            if isinstance(val, (int, np.integer)):
+                val_mantissa = float(val >> shift) if val.bit_length() > shift else math.ldexp(float(val), -shift)
+                out.flat[i] = val_mantissa / u_mantissa
+            else:
+                out.flat[i] = math.ldexp(float(val), -shift) / u_mantissa
+        return out
+    return np.asarray(diff_shortest / u, dtype=dtype)
 
 
 def _circular_diff(
@@ -246,8 +266,27 @@ def _circular_diff(
     calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
     v1_f = np.asarray(v1, dtype=calc_dtype)
     v2_f = np.asarray(v2, dtype=calc_dtype)
+    if isinstance(u, (int, np.integer)) and u.bit_length() > 1024:
+        return v1_f - v2_f
     u_f = float(u)
     return np.remainder(v1_f, u_f) - np.remainder(v2_f, u_f)
+
+
+def _normalize_circumference(circumference: float | None) -> Any:
+    """Validate and normalize circumference parameter."""
+    if circumference is None:
+        return None
+    if isinstance(circumference, (int, np.integer)):
+        if circumference <= 0:
+            raise ValueError("Circumference must be a finite, positive number.")
+        return int(circumference)
+    if (
+        not isinstance(circumference, (numbers.Real, np.floating))
+        or not np.isfinite(circumference)
+        or circumference <= 0
+    ):
+        raise ValueError("Circumference must be a finite, positive number.")
+    return _to_int_if_integral(circumference)
 
 
 def circular_metric(
@@ -266,19 +305,7 @@ def circular_metric(
     metric : DistanceMetric
         Callable that computes circular distance between two arrays element-wise.
     """
-    if circumference is not None:
-        if isinstance(circumference, (int, np.integer)):
-            if circumference <= 0:
-                raise ValueError("Circumference must be a finite, positive number.")
-            circumference = int(circumference)
-        else:
-            if (
-                not isinstance(circumference, (numbers.Real, np.floating))
-                or not np.isfinite(circumference)
-                or circumference <= 0
-            ):
-                raise ValueError("Circumference must be a finite, positive number.")
-            circumference = _to_int_if_integral(circumference)
+    circumference = _normalize_circumference(circumference)
 
     def _metric(
         v1: npt.NDArray[ValueScalarType],
@@ -305,9 +332,12 @@ def circular_metric(
         u = _to_int_if_integral(u)
         real_dtype = np.empty((), dtype=dtype).real.dtype
         diff = _circular_diff(v1, v2, u, real_dtype)
-        diff_mod = np.remainder(diff, u)
-        diff_shortest = np.where(diff_mod < u - diff_mod, diff_mod, u - diff_mod)
-        diff_scaled = np.asarray(diff_shortest / u, dtype=real_dtype)
+        if isinstance(u, (int, np.integer)) and u.bit_length() > 1024:
+            diff_shortest = np.abs(diff)
+        else:
+            diff_mod = np.remainder(diff, u)
+            diff_shortest = np.where(diff_mod < u - diff_mod, diff_mod, u - diff_mod)
+        diff_scaled = _safe_divide_by_u(diff_shortest, u, real_dtype)
         return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
     return _metric
@@ -341,13 +371,13 @@ def _bipolar_terms(
             diff,
             term1,
             out=np.zeros(out_shape, dtype=object),
-            where=nonzero,
+            where=nonzero & (term1 != 0),
         )
         ratio2 = np.divide(
             diff,
             term2,
             out=np.zeros(out_shape, dtype=object),
-            where=nonzero,
+            where=nonzero & (term2 != 0),
         )
         return (
             np.asarray(ratio1, dtype=calc_dtype),
@@ -358,32 +388,46 @@ def _bipolar_terms(
     v2_f = np.asarray(v2, dtype=calc_dtype)
     min_f = float(v_min)
     max_f = float(v_max)
-    max_abs = max(abs(min_f), abs(max_f))
-    exp = 0
-    if max_abs > 0:
-        _, exp = math.frexp(max_abs)
-        v1_f = np.ldexp(v1_f, -exp)
-        v2_f = np.ldexp(v2_f, -exp)
-        min_f = math.ldexp(min_f, -exp)
-        max_f = math.ldexp(max_f, -exp)
+    max_v = max(float(np.max(np.abs(v1_f))), float(np.max(np.abs(v2_f))))
+
+    max_abs1 = max(abs(min_f), max_v)
+    exp1 = 0
+    if max_abs1 > 0:
+        _, exp1 = math.frexp(max_abs1)
+    v1_1 = np.ldexp(v1_f, -exp1)
+    v2_1 = np.ldexp(v2_f, -exp1)
+    min_1 = math.ldexp(min_f, -exp1)
+    term1_f = (v1_1 - min_1) + (v2_1 - min_1)
+
+    max_abs2 = max(abs(max_f), max_v)
+    exp2 = 0
+    if max_abs2 > 0:
+        _, exp2 = math.frexp(max_abs2)
+    v1_2 = np.ldexp(v1_f, -exp2)
+    v2_2 = np.ldexp(v2_f, -exp2)
+    max_2 = math.ldexp(max_f, -exp2)
+    term2_f = (max_2 - v1_2) + (max_2 - v2_2)
+
     if not (np.issubdtype(np.asarray(v1).dtype, np.floating) and np.issubdtype(np.asarray(v2).dtype, np.floating)):
         diff = _safe_diff(v1, v2)
-        diff_f = np.ldexp(np.asarray(diff, dtype=calc_dtype), -exp)
+        diff_arr = np.asarray(diff, dtype=calc_dtype)
+        diff_1 = np.ldexp(diff_arr, -exp1)
+        diff_2 = np.ldexp(diff_arr, -exp2)
     else:
-        diff_f = v1_f - v2_f
-    term1_f = (v1_f - min_f) + (v2_f - min_f)
-    term2_f = (max_f - v1_f) + (max_f - v2_f)
+        diff_1 = v1_1 - v2_1
+        diff_2 = v1_2 - v2_2
+
     ratio1 = np.divide(
-        diff_f,
+        diff_1,
         term1_f,
         out=np.zeros(out_shape, dtype=calc_dtype),
-        where=nonzero,
+        where=nonzero & (term1_f != 0),
     )
     ratio2 = np.divide(
-        diff_f,
+        diff_2,
         term2_f,
         out=np.zeros(out_shape, dtype=calc_dtype),
-        where=nonzero,
+        where=nonzero & (term2_f != 0),
     )
     return ratio1, ratio2
 

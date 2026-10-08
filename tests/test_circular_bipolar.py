@@ -567,3 +567,34 @@ def test_circular_inferred_circumference_mixed_integral_oversized_integer() -> N
     vh2 = np.array([[0, 0.0]], dtype=object)
     dist_huge = circ_fn_huge(vh1, vh2, dummy_idx, dummy_idx, dummy_nv)
     assert np.isclose(dist_huge[0, 0], 1.0)
+
+
+def test_safe_diff_mixed_int_and_object_no_truncation() -> None:
+    bip_fn = bipolar_metric(low=0, high=2)
+    v1 = np.array([1], dtype=np.int32)
+    v2 = np.array([1.5], dtype=object)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist[0], 1.0 / 15.0)
+
+
+def test_bipolar_asymmetric_scale_underflow_no_nan() -> None:
+    bip_fn = bipolar_metric(low=-1e308, high=1e-308)
+    v1 = np.array([0.0])
+    v2 = np.array([1e-308])
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+
+
+def test_circular_huge_circumference_non_integer_data() -> None:
+    circ_fn = circular_metric(circumference=2**2000)
+    v1 = np.array([0.0])
+    v2 = np.array([1.5])
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert not np.isnan(dist[0])
+    assert dist[0] >= 0.0
