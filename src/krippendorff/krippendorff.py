@@ -131,6 +131,19 @@ def _ratio_metric(
     )
 
 
+def _has_complex(arr: npt.NDArray) -> bool:
+    """Check if an array has complex dtype or contains complex elements in object dtype."""
+    return np.iscomplexobj(arr) or any(isinstance(x, (complex, np.complexfloating)) for x in arr.flat)
+
+
+def _is_finite_array(arr: npt.NDArray) -> bool:
+    """Check if an array contains exclusively finite numeric values."""
+    try:
+        return bool(np.isfinite(arr).all())
+    except (TypeError, ValueError):
+        return False
+
+
 def circular_metric(
     circumference: float | None = None,
 ) -> DistanceMetric:
@@ -158,9 +171,9 @@ def circular_metric(
         n_v: npt.NDArray[MetricResultScalarType],
         dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
     ) -> npt.NDArray[MetricResultScalarType]:
-        if np.iscomplexobj(v1) or np.iscomplexobj(v2):
+        if _has_complex(v1) or _has_complex(v2):
             raise ValueError("Circular metric does not support complex values.")
-        if not np.isfinite(v1).all() or not np.isfinite(v2).all():
+        if not _is_finite_array(v1) or not _is_finite_array(v2):
             raise ValueError("Circular metric requires finite values.")
         v1_cast = v1.astype(dtype)
         v2_cast = v2.astype(dtype)
@@ -217,9 +230,9 @@ def bipolar_metric(
         n_v: npt.NDArray[MetricResultScalarType],
         dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
     ) -> npt.NDArray[MetricResultScalarType]:
-        if np.iscomplexobj(v1) or np.iscomplexobj(v2):
+        if _has_complex(v1) or _has_complex(v2):
             raise ValueError("Bipolar metric does not support complex values.")
-        if not np.isfinite(v1).all() or not np.isfinite(v2).all():
+        if not _is_finite_array(v1) or not _is_finite_array(v2):
             raise ValueError("Bipolar metric requires finite values.")
         v_min = float(low) if low is not None else min(float(np.min(v1)), float(np.min(v2)))
         v_max = float(high) if high is not None else max(float(np.max(v1)), float(np.max(v2)))

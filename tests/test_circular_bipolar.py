@@ -245,3 +245,27 @@ def test_circular_metric_uint_subtraction_overflow() -> None:
     d2 = circ_fn(u2, u1, dummy_idx, dummy_idx, dummy_nv)
     assert np.allclose(d1, d2)
     assert np.allclose(d1, np.sin(np.pi * 5 / 360) ** 2)
+
+
+def test_object_dtype_complex_values_rejected() -> None:
+    circ_fn = circular_metric(4)
+    bip_fn = bipolar_metric(-1, 1)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+
+    obj_complex = np.array([1 + 2j], dtype=object)
+    obj_real = np.array([1.0], dtype=object)
+
+    with pytest.raises(ValueError, match="does not support complex"):
+        circ_fn(obj_complex, obj_real, dummy_idx, dummy_idx, dummy_nv)
+
+    with pytest.raises(ValueError, match="does not support complex"):
+        bip_fn(obj_complex, obj_real, dummy_idx, dummy_idx, dummy_nv)
+
+    data = [{"u1": 1 + 2j, "u2": 2}, {"u1": 1 + 2j, "u2": 2}]
+    complex_domain = [1 + 2j, 2]
+    with pytest.raises(ValueError, match="does not support complex"):
+        alpha(reliability_data=data, value_domain=complex_domain, level_of_measurement=circ_fn)
+
+    with pytest.raises(ValueError, match="does not support complex"):
+        alpha(reliability_data=data, value_domain=complex_domain, level_of_measurement=bip_fn)
