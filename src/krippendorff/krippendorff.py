@@ -155,7 +155,7 @@ def _is_all_pure_integer(arr: npt.NDArray) -> bool:
     if np.issubdtype(arr.dtype, np.integer):
         return True
     if arr.dtype == object:
-        return all(isinstance(x, (int, np.integer)) for x in arr.flat)
+        return all(isinstance(x, (int, np.integer)) and not isinstance(x, bool) for x in arr.flat)
     return False
 
 
@@ -163,10 +163,43 @@ def _is_all_integer(arr: npt.NDArray) -> bool:
     """Check if all elements of an array represent integer values."""
     if _is_all_pure_integer(arr):
         return True
-    try:
-        return bool(np.all(arr.astype(float) % 1 == 0))
-    except (TypeError, ValueError, OverflowError):
+    for x in arr.flat:
+        if isinstance(x, bool):
+            return False
+        if isinstance(x, (int, np.integer)):
+            continue
+        if isinstance(x, (numbers.Real, np.floating)) and np.isfinite(x):
+            try:
+                if float(x).is_integer():
+                    continue
+            except (OverflowError, ValueError):
+                pass
         return False
+    return True
+
+
+def _to_pure_integer_if_all_integral(arr: npt.NDArray) -> npt.NDArray:
+    """Normalize object array containing integral values to pure integer object array."""
+    if np.issubdtype(arr.dtype, np.integer):
+        return arr
+    if arr.dtype == object:
+        for x in arr.flat:
+            if isinstance(x, bool):
+                return arr
+            if isinstance(x, (int, np.integer)):
+                continue
+            if isinstance(x, (numbers.Real, np.floating)) and np.isfinite(x):
+                try:
+                    if float(x).is_integer():
+                        continue
+                except (OverflowError, ValueError):
+                    pass
+            return arr
+        normalized = np.empty(arr.shape, dtype=object)
+        for i, x in enumerate(arr.flat):
+            normalized.flat[i] = int(x)
+        return normalized
+    return arr
 
 
 def _to_object_int(x: Any) -> Any:
@@ -206,8 +239,10 @@ def _circular_diff(
     real_dtype: np.dtype,
 ) -> Any:
     """Compute circular difference, reducing floating-point operands modulo u to avoid overflow."""
-    if _is_all_pure_integer(v1) and _is_all_pure_integer(v2):
-        return _safe_diff(v1, v2)
+    v1_norm = _to_pure_integer_if_all_integral(v1)
+    v2_norm = _to_pure_integer_if_all_integral(v2)
+    if _is_all_pure_integer(v1_norm) and _is_all_pure_integer(v2_norm):
+        return _safe_diff(v1_norm, v2_norm)
     calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
     v1_f = np.asarray(v1, dtype=calc_dtype)
     v2_f = np.asarray(v2, dtype=calc_dtype)
@@ -257,11 +292,13 @@ def circular_metric(
             raise ValueError("Circular metric does not support complex values.")
         if not _is_finite_array(v1) or not _is_finite_array(v2):
             raise ValueError("Circular metric requires finite values.")
+        v1 = _to_pure_integer_if_all_integral(v1)
+        v2 = _to_pure_integer_if_all_integral(v2)
         if circumference is None:
             if not (_is_all_integer(v1) and _is_all_integer(v2)):
                 raise ValueError("An explicit circumference must be provided for non-integer circular data.")
-            v_min = min(np.min(v1), np.min(v2))  # ty:ignore[invalid-argument-type]
-            v_max = max(np.max(v1), np.max(v2))  # ty:ignore[invalid-argument-type]
+            v_min = min(np.min(v1), np.min(v2))
+            v_max = max(np.max(v1), np.max(v2))
             u = _safe_diff(v_max, v_min) + 1
         else:
             u = circumference
@@ -284,6 +321,8 @@ def _bipolar_terms(
     calc_dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """Compute bounded ratios for bipolar metric without overflow."""
+    v1 = _to_pure_integer_if_all_integral(v1)
+    v2 = _to_pure_integer_if_all_integral(v2)
     v_min_norm = _to_int_if_integral(v_min)
     v_max_norm = _to_int_if_integral(v_max)
     is_int_domain = (
@@ -327,7 +366,7 @@ def _bipolar_terms(
         v2_f = np.ldexp(v2_f, -exp)
         min_f = math.ldexp(min_f, -exp)
         max_f = math.ldexp(max_f, -exp)
-    if _is_all_pure_integer(v1) and _is_all_pure_integer(v2):
+    if not (np.issubdtype(np.asarray(v1).dtype, np.floating) and np.issubdtype(np.asarray(v2).dtype, np.floating)):
         diff = _safe_diff(v1, v2)
         diff_f = np.ldexp(np.asarray(diff, dtype=calc_dtype), -exp)
     else:
@@ -395,8 +434,10 @@ def bipolar_metric(
             raise ValueError("Bipolar metric does not support complex values.")
         if not _is_finite_array(v1) or not _is_finite_array(v2):
             raise ValueError("Bipolar metric requires finite values.")
-        v_min = low if low is not None else min(np.min(v1), np.min(v2))  # ty:ignore[invalid-argument-type]
-        v_max = high if high is not None else max(np.max(v1), np.max(v2))  # ty:ignore[invalid-argument-type]
+        v1 = _to_pure_integer_if_all_integral(v1)
+        v2 = _to_pure_integer_if_all_integral(v2)
+        v_min = low if low is not None else min(np.min(v1), np.min(v2))
+        v_max = high if high is not None else max(np.max(v1), np.max(v2))
         v_min = _to_int_if_integral(v_min)
         v_max = _to_int_if_integral(v_max)
         if v_min >= v_max:
@@ -625,7 +666,7 @@ def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
     arr = np.empty(len(domain_list), dtype=object)
     for i, v in enumerate(domain_list):
         arr[i] = v
-    return arr
+    return _to_pure_integer_if_all_integral(arr)
 
 
 def _extract_coder_dicts(

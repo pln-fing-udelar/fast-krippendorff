@@ -524,3 +524,46 @@ def test_circular_fractional_circumference_large_integer_categories_no_collapse(
     dummy_nv = np.array([1.0])
     dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert dist[0] > 0.0
+
+
+def test_circular_mixed_integral_object_domain_large_categories() -> None:
+    circ_fn = circular_metric(circumference=4)
+    v1 = np.array([[2**53], [0.0]], dtype=object)
+    v2 = np.array([[2**53 + 1, 0.0]], dtype=object)
+    dummy_idx = np.zeros((1, 1), dtype=int)
+    dummy_nv = np.ones((1, 1), dtype=float)
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist[0, 0], 0.5)
+
+
+def test_bipolar_mixed_integral_object_domain_large_categories() -> None:
+    bip_fn = bipolar_metric()
+    v1 = np.array([[2**53], [0.0]], dtype=object)
+    v2 = np.array([[2**53 + 1, 0.0]], dtype=object)
+    dummy_idx = np.zeros((1, 1), dtype=int)
+    dummy_nv = np.ones((1, 1), dtype=float)
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert dist[0, 0] > 0.0
+    assert not np.isnan(dist[0, 0])
+
+
+def test_circular_inferred_circumference_mixed_integral_oversized_integer() -> None:
+    circ_fn = circular_metric()
+    big = 2**100
+    v1 = np.array([[big], [0.0]], dtype=object)
+    v2 = np.array([[2**100, 0.0]], dtype=object)
+    dummy_idx = np.zeros((1, 1), dtype=int)
+    dummy_nv = np.ones((1, 1), dtype=float)
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert dist[0, 0] == 0.0
+    v3 = np.array([[big + 1, 0.0]], dtype=object)
+    dist2 = circ_fn(v1, v3, dummy_idx, dummy_idx, dummy_nv)
+    assert dist2[0, 0] > 0.0
+    assert not np.isnan(dist2[0, 0])
+
+    circ_fn_huge = circular_metric(circumference=2 * 2**2000)
+    huge = 2**2000
+    vh1 = np.array([[huge], [0.0]], dtype=object)
+    vh2 = np.array([[0, 0.0]], dtype=object)
+    dist_huge = circ_fn_huge(vh1, vh2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist_huge[0, 0], 1.0)
