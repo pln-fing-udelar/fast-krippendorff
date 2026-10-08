@@ -154,12 +154,12 @@ def _is_all_integer(arr: npt.NDArray) -> bool:
 
 
 def _safe_diff(a: Any, b: Any) -> Any:
-    """Compute difference safely, avoiding unsigned integer underflow and precision loss."""
+    """Compute difference safely, avoiding integer underflow/overflow and precision loss."""
     a_arr = np.asarray(a)
     b_arr = np.asarray(b)
     if np.issubdtype(a_arr.dtype, np.floating) or np.issubdtype(b_arr.dtype, np.floating):
         return a - b
-    if np.issubdtype(a_arr.dtype, np.unsignedinteger) or np.issubdtype(b_arr.dtype, np.unsignedinteger):
+    if np.issubdtype(a_arr.dtype, np.integer) or np.issubdtype(b_arr.dtype, np.integer):
         if a_arr.dtype == np.uint64 or b_arr.dtype == np.uint64:
             return np.asarray(a, dtype=object) - np.asarray(b, dtype=object)
         return np.asarray(a, dtype=np.int64) - np.asarray(b, dtype=np.int64)
@@ -262,8 +262,11 @@ def bipolar_metric(
         term2 = _safe_diff(v_max, v1) + _safe_diff(v_max, v2)
         nonzero = v1 != v2
         real_dtype = np.empty((), dtype=dtype).real.dtype
-        num = np.asarray(diff**2, dtype=real_dtype)
-        denom = np.asarray(term1 * term2, dtype=real_dtype)
+        diff_f = np.asarray(diff, dtype=real_dtype)
+        term1_f = np.asarray(term1, dtype=real_dtype)
+        term2_f = np.asarray(term2, dtype=real_dtype)
+        num = diff_f**2
+        denom = term1_f * term2_f
         res = np.divide(
             num,
             denom,

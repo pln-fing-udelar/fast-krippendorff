@@ -369,3 +369,13 @@ def test_safe_diff_branch_coverage() -> None:
     u64_2 = np.array([10], dtype=np.uint64)
     res_u64 = circ_fn(u64_1, u64_2, dummy_idx, dummy_idx, dummy_nv)
     assert np.all(np.isfinite(res_u64))
+
+
+def test_bipolar_int32_overflow_prevention() -> None:
+    bip_fn = bipolar_metric()
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    v1 = np.array([0], dtype=np.int32)
+    v2 = np.array([100_000], dtype=np.int32)
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.allclose(dist, 1.0)
