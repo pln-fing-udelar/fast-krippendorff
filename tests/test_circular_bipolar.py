@@ -473,3 +473,34 @@ def test_oversized_integer_finiteness_check() -> None:
     dummy_nv = np.array([1.0])
     dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert np.all(np.isfinite(dist))
+
+
+def test_circular_float_circumference_integer_categories_no_collapse() -> None:
+    circ_fn = circular_metric(circumference=4.0)
+    v1 = np.array([2**53], dtype=np.int64)
+    v2 = np.array([2**53 + 1], dtype=np.int64)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist[0], 0.5)
+
+
+def test_bipolar_float_bounds_large_integer_categories_no_collapse() -> None:
+    bip_fn = bipolar_metric(low=0.0, high=float(2**54))
+    v1 = np.array([2**53], dtype=np.int64)
+    v2 = np.array([2**53 + 1], dtype=np.int64)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert dist[0] > 0.0
+
+
+def test_bipolar_oversized_integer_support() -> None:
+    big = 10**400
+    v1 = np.array([big], dtype=object)
+    v2 = np.array([0], dtype=object)
+    bip_fn = bipolar_metric(low=0, high=2 * big)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist[0], 1.0 / 3.0)

@@ -177,6 +177,15 @@ def _to_object_int(x: Any) -> Any:
     return np.array([int(item) for item in x_arr.flat], dtype=object).reshape(x_arr.shape)
 
 
+def _to_int_if_integral(x: Any) -> Any:
+    """Convert an integral scalar to Python int if it represents an integer value."""
+    if isinstance(x, (int, np.integer)):
+        return int(x)
+    if isinstance(x, (float, np.floating)) and np.isfinite(x) and x.is_integer():
+        return int(x)
+    return x
+
+
 def _safe_diff(a: Any, b: Any) -> Any:
     """Compute difference safely, avoiding integer underflow/overflow and precision loss."""
     a_arr = np.asarray(a)
@@ -197,7 +206,8 @@ def _circular_diff(
     real_dtype: np.dtype,
 ) -> Any:
     """Compute circular difference, reducing floating-point operands modulo u to avoid overflow."""
-    if _is_all_pure_integer(v1) and _is_all_pure_integer(v2) and isinstance(u, (int, np.integer)):
+    u_norm = _to_int_if_integral(u)
+    if _is_all_pure_integer(v1) and _is_all_pure_integer(v2) and isinstance(u_norm, (int, np.integer)):
         return _safe_diff(v1, v2)
     calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
     v1_f = np.asarray(v1, dtype=calc_dtype)
@@ -222,8 +232,19 @@ def circular_metric(
     metric : DistanceMetric
         Callable that computes circular distance between two arrays element-wise.
     """
-    if circumference is not None and (not np.isfinite(circumference) or circumference <= 0):
-        raise ValueError("Circumference must be a finite, positive number.")
+    if circumference is not None:
+        if isinstance(circumference, (int, np.integer)):
+            if circumference <= 0:
+                raise ValueError("Circumference must be a finite, positive number.")
+            circumference = int(circumference)
+        else:
+            if (
+                not isinstance(circumference, (numbers.Real, np.floating))
+                or not np.isfinite(circumference)
+                or circumference <= 0
+            ):
+                raise ValueError("Circumference must be a finite, positive number.")
+            circumference = _to_int_if_integral(circumference)
 
     def _metric(
         v1: npt.NDArray[ValueScalarType],
@@ -245,6 +266,7 @@ def circular_metric(
             u = _safe_diff(v_max, v_min) + 1
         else:
             u = circumference
+        u = _to_int_if_integral(u)
         real_dtype = np.empty((), dtype=dtype).real.dtype
         diff = _circular_diff(v1, v2, u, real_dtype)
         diff_mod = np.remainder(diff, u)
@@ -261,22 +283,37 @@ def _bipolar_terms(
     v_min: Any,
     v_max: Any,
     calc_dtype: npt.DTypeLike,
-) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
-    """Compute difference and scale terms for bipolar metric without overflow."""
+) -> tuple[npt.NDArray, npt.NDArray]:
+    """Compute bounded ratios for bipolar metric without overflow."""
+    v_min_norm = _to_int_if_integral(v_min)
+    v_max_norm = _to_int_if_integral(v_max)
     is_int_domain = (
         _is_all_pure_integer(v1)
         and _is_all_pure_integer(v2)
-        and isinstance(v_min, (int, np.integer))
-        and isinstance(v_max, (int, np.integer))
+        and isinstance(v_min_norm, (int, np.integer))
+        and isinstance(v_max_norm, (int, np.integer))
     )
+    nonzero = v1 != v2
+    out_shape = np.broadcast(v1, v2).shape
     if is_int_domain:
         diff = _safe_diff(v1, v2)
-        term1 = _safe_diff(v1, v_min) + _safe_diff(v2, v_min)
-        term2 = _safe_diff(v_max, v1) + _safe_diff(v_max, v2)
+        term1 = _safe_diff(v1, v_min_norm) + _safe_diff(v2, v_min_norm)
+        term2 = _safe_diff(v_max_norm, v1) + _safe_diff(v_max_norm, v2)
+        ratio1 = np.divide(
+            diff,
+            term1,
+            out=np.zeros(out_shape, dtype=object),
+            where=nonzero,
+        )
+        ratio2 = np.divide(
+            diff,
+            term2,
+            out=np.zeros(out_shape, dtype=object),
+            where=nonzero,
+        )
         return (
-            np.asarray(diff, dtype=calc_dtype),
-            np.asarray(term1, dtype=calc_dtype),
-            np.asarray(term2, dtype=calc_dtype),
+            np.asarray(ratio1, dtype=calc_dtype),
+            np.asarray(ratio2, dtype=calc_dtype),
         )
 
     v1_f = np.asarray(v1, dtype=calc_dtype)
@@ -293,7 +330,30 @@ def _bipolar_terms(
     diff_f = v1_f - v2_f
     term1_f = (v1_f - min_f) + (v2_f - min_f)
     term2_f = (max_f - v1_f) + (max_f - v2_f)
-    return diff_f, term1_f, term2_f
+    ratio1 = np.divide(
+        diff_f,
+        term1_f,
+        out=np.zeros(out_shape, dtype=calc_dtype),
+        where=nonzero,
+    )
+    ratio2 = np.divide(
+        diff_f,
+        term2_f,
+        out=np.zeros(out_shape, dtype=calc_dtype),
+        where=nonzero,
+    )
+    return ratio1, ratio2
+
+
+def _normalize_endpoint(val: Any, name: str) -> Any:
+    """Validate and normalize a scale endpoint."""
+    if val is None:
+        return None
+    if isinstance(val, (int, np.integer)):
+        return int(val)
+    if not (isinstance(val, (numbers.Real, np.floating)) and np.isfinite(val)):
+        raise ValueError(f"{name} must be a finite number.")
+    return _to_int_if_integral(val)
 
 
 def bipolar_metric(
@@ -314,10 +374,8 @@ def bipolar_metric(
     metric : DistanceMetric
         Callable that computes bipolar distance between two arrays element-wise.
     """
-    if low is not None and not np.isfinite(low):
-        raise ValueError("low must be a finite number.")
-    if high is not None and not np.isfinite(high):
-        raise ValueError("high must be a finite number.")
+    low = _normalize_endpoint(low, "low")
+    high = _normalize_endpoint(high, "high")
     if low is not None and high is not None and low >= high:
         raise ValueError("low must be strictly less than high.")
 
@@ -335,28 +393,16 @@ def bipolar_metric(
             raise ValueError("Bipolar metric requires finite values.")
         v_min = low if low is not None else min(np.min(v1), np.min(v2))  # ty:ignore[invalid-argument-type]
         v_max = high if high is not None else max(np.max(v1), np.max(v2))  # ty:ignore[invalid-argument-type]
+        v_min = _to_int_if_integral(v_min)
+        v_max = _to_int_if_integral(v_max)
         if v_min >= v_max:
             raise ValueError("low must be strictly less than high.")
-        if (v1 < v_min).any() or (v1 > v_max).any() or (v2 < v_min).any() or (v2 > v_max).any():  # ty:ignore[unsupported-operator]
+        if (v1 < v_min).any() or (v1 > v_max).any() or (v2 < v_min).any() or (v2 > v_max).any():
             raise ValueError("The data contains out-of-bounds values for the specified bipolar endpoints.")
 
         real_dtype = np.empty((), dtype=dtype).real.dtype
         calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
-        diff_f, term1_f, term2_f = _bipolar_terms(v1, v2, v_min, v_max, calc_dtype)
-
-        nonzero = v1 != v2
-        ratio1 = np.divide(
-            diff_f,
-            term1_f,
-            out=np.zeros(np.broadcast(v1, v2).shape, dtype=calc_dtype),
-            where=nonzero,
-        )
-        ratio2 = np.divide(
-            diff_f,
-            term2_f,
-            out=np.zeros(np.broadcast(v1, v2).shape, dtype=calc_dtype),
-            where=nonzero,
-        )
+        ratio1, ratio2 = _bipolar_terms(v1, v2, v_min, v_max, calc_dtype)
         return (ratio1 * ratio2).astype(dtype)
 
     return _metric
