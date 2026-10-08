@@ -153,6 +153,19 @@ def _is_all_integer(arr: npt.NDArray) -> bool:
     return bool(np.all(arr.astype(float) % 1 == 0))
 
 
+def _safe_diff(a: Any, b: Any) -> Any:
+    """Compute difference safely, avoiding unsigned integer underflow and precision loss."""
+    a_arr = np.asarray(a)
+    b_arr = np.asarray(b)
+    if np.issubdtype(a_arr.dtype, np.floating) or np.issubdtype(b_arr.dtype, np.floating):
+        return a - b
+    if np.issubdtype(a_arr.dtype, np.unsignedinteger) or np.issubdtype(b_arr.dtype, np.unsignedinteger):
+        if a_arr.dtype == np.uint64 or b_arr.dtype == np.uint64:
+            return np.asarray(a, dtype=object) - np.asarray(b, dtype=object)
+        return np.asarray(a, dtype=np.int64) - np.asarray(b, dtype=np.int64)
+    return a - b
+
+
 def circular_metric(
     circumference: float | None = None,
 ) -> DistanceMetric:
@@ -184,18 +197,18 @@ def circular_metric(
             raise ValueError("Circular metric does not support complex values.")
         if not _is_finite_array(v1) or not _is_finite_array(v2):
             raise ValueError("Circular metric requires finite values.")
-        v1_cast = v1.astype(dtype)
-        v2_cast = v2.astype(dtype)
         if circumference is None:
             if not (_is_all_integer(v1) and _is_all_integer(v2)):
                 raise ValueError("An explicit circumference must be provided for non-integer circular data.")
-            v_min = min(float(np.min(v1_cast)), float(np.min(v2_cast)))
-            v_max = max(float(np.max(v1_cast)), float(np.max(v2_cast)))
-            u = v_max - v_min + 1
+            v_min = min(np.min(v1), np.min(v2))  # ty:ignore[invalid-argument-type]
+            v_max = max(np.max(v1), np.max(v2))  # ty:ignore[invalid-argument-type]
+            u = _safe_diff(v_max, v_min) + 1
         else:
-            u = float(circumference)
-        diff = v1_cast - v2_cast
-        return (np.sin(np.pi * diff / u) ** 2).astype(dtype)
+            u = circumference
+        diff = _safe_diff(v1, v2)
+        real_dtype = np.empty((), dtype=dtype).real.dtype
+        diff_scaled = np.asarray(diff, dtype=real_dtype) / float(u)
+        return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
     return _metric
 
@@ -237,25 +250,27 @@ def bipolar_metric(
             raise ValueError("Bipolar metric does not support complex values.")
         if not _is_finite_array(v1) or not _is_finite_array(v2):
             raise ValueError("Bipolar metric requires finite values.")
-        v1_cast = v1.astype(dtype)
-        v2_cast = v2.astype(dtype)
-        v_min = float(low) if low is not None else min(float(np.min(v1_cast)), float(np.min(v2_cast)))
-        v_max = float(high) if high is not None else max(float(np.max(v1_cast)), float(np.max(v2_cast)))
+        v_min = low if low is not None else min(np.min(v1), np.min(v2))  # ty:ignore[invalid-argument-type]
+        v_max = high if high is not None else max(np.max(v1), np.max(v2))  # ty:ignore[invalid-argument-type]
         if v_min >= v_max:
             raise ValueError("low must be strictly less than high.")
-        if (v1_cast < v_min).any() or (v1_cast > v_max).any() or (v2_cast < v_min).any() or (v2_cast > v_max).any():
+        if (v1 < v_min).any() or (v1 > v_max).any() or (v2 < v_min).any() or (v2 > v_max).any():  # ty:ignore[unsupported-operator]
             raise ValueError("The data contains out-of-bounds values for the specified bipolar endpoints.")
 
-        numerator = (v1_cast - v2_cast) ** 2
-        denom = (v1_cast + v2_cast - 2 * v_min) * (2 * v_max - v1_cast - v2_cast)
-        nonzero = v1_cast != v2_cast
-        return np.divide(
-            numerator,
+        diff = _safe_diff(v1, v2)
+        term1 = _safe_diff(v1, v_min) + _safe_diff(v2, v_min)
+        term2 = _safe_diff(v_max, v1) + _safe_diff(v_max, v2)
+        nonzero = v1 != v2
+        real_dtype = np.empty((), dtype=dtype).real.dtype
+        num = np.asarray(diff**2, dtype=real_dtype)
+        denom = np.asarray(term1 * term2, dtype=real_dtype)
+        res = np.divide(
+            num,
             denom,
-            out=np.zeros(np.broadcast(v1_cast, v2_cast).shape, dtype=dtype),
+            out=np.zeros(np.broadcast(v1, v2).shape, dtype=real_dtype),
             where=nonzero,
-            dtype=dtype,
         )
+        return res.astype(dtype)
 
     return _metric
 

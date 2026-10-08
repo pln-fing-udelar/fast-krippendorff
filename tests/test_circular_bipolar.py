@@ -321,3 +321,51 @@ def test_non_finite_object_dtype_rejected() -> None:
 
         with pytest.raises(ValueError, match="Bipolar metric requires finite values"):
             bip_fn(obj_arr, valid_arr, dummy_idx, dummy_idx, dummy_nv)
+
+
+def test_large_integer_categories_not_collapsed() -> None:
+    data = [
+        [2**53, 2**53 + 1],
+        [2**53, 2**53],
+    ]
+    res_circ = alpha(data, level_of_measurement="circular")
+    assert np.isfinite(res_circ)
+    assert res_circ == 0.0
+
+    res_bip = alpha(data, level_of_measurement="bipolar")
+    assert np.isfinite(res_bip)
+    assert res_bip == 0.0
+
+
+def test_complex_computation_dtype_supported() -> None:
+    data_circ = [
+        [0, 1, 2, 3],
+        [0, 2, 2, 0],
+    ]
+    res_circ = alpha(data_circ, level_of_measurement="circular", dtype=np.complex128)
+    assert isinstance(res_circ, (complex, np.complexfloating))
+    assert round(res_circ.real, 6) == 0.5625
+    assert res_circ.imag == 0.0
+
+    data_bip = [
+        [-1, 0, 1],
+        [-1, 1, 1],
+    ]
+    res_bip = alpha(data_bip, level_of_measurement="bipolar", dtype=np.complex128)
+    assert isinstance(res_bip, (complex, np.complexfloating))
+    assert res_bip.imag == 0.0
+
+
+def test_safe_diff_branch_coverage() -> None:
+    f1 = np.array([1.5, 2.5])
+    f2 = np.array([0.5, 1.0])
+    circ_fn = circular_metric(circumference=10)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    res_f = circ_fn(f1, f2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.all(np.isfinite(res_f))
+
+    u64_1 = np.array([5], dtype=np.uint64)
+    u64_2 = np.array([10], dtype=np.uint64)
+    res_u64 = circ_fn(u64_1, u64_2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.all(np.isfinite(res_u64))
