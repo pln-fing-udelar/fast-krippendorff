@@ -155,6 +155,15 @@ def _is_all_integer(arr: npt.NDArray) -> bool:
     return bool(np.all(arr.astype(float) % 1 == 0))
 
 
+def _is_all_pure_integer(arr: npt.NDArray) -> bool:
+    """Check if array has integer dtype or is an object array containing pure integers."""
+    if np.issubdtype(arr.dtype, np.integer):
+        return True
+    if arr.dtype == object:
+        return all(isinstance(x, (int, np.integer)) for x in arr.flat)
+    return False
+
+
 def _to_object_int(x: Any) -> Any:
     """Convert an integer scalar or array to Python int objects to avoid NumPy overflow."""
     x_arr = np.asarray(x)
@@ -216,11 +225,54 @@ def circular_metric(
         else:
             u = circumference
         diff = _safe_diff(v1, v2)
+        diff_mod = np.remainder(diff, u)
+        diff_shortest = np.where(diff_mod < u - diff_mod, diff_mod, u - diff_mod)
         real_dtype = np.empty((), dtype=dtype).real.dtype
-        diff_scaled = np.asarray(diff, dtype=real_dtype) / float(u)
+        diff_scaled = np.asarray(diff_shortest, dtype=real_dtype) / float(u)
         return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
     return _metric
+
+
+def _bipolar_terms(
+    v1: npt.NDArray,
+    v2: npt.NDArray,
+    v_min: Any,
+    v_max: Any,
+    calc_dtype: npt.DTypeLike,
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    """Compute difference and scale terms for bipolar metric without overflow."""
+    is_int_domain = (
+        _is_all_pure_integer(v1)
+        and _is_all_pure_integer(v2)
+        and isinstance(v_min, (int, np.integer))
+        and isinstance(v_max, (int, np.integer))
+    )
+    if is_int_domain:
+        diff = _safe_diff(v1, v2)
+        term1 = _safe_diff(v1, v_min) + _safe_diff(v2, v_min)
+        term2 = _safe_diff(v_max, v1) + _safe_diff(v_max, v2)
+        return (
+            np.asarray(diff, dtype=calc_dtype),
+            np.asarray(term1, dtype=calc_dtype),
+            np.asarray(term2, dtype=calc_dtype),
+        )
+
+    v1_f = np.asarray(v1, dtype=calc_dtype)
+    v2_f = np.asarray(v2, dtype=calc_dtype)
+    min_f = float(v_min)
+    max_f = float(v_max)
+    max_abs = max(abs(min_f), abs(max_f))
+    if max_abs > 0:
+        _, exp = math.frexp(max_abs)
+        v1_f = np.ldexp(v1_f, -exp)
+        v2_f = np.ldexp(v2_f, -exp)
+        min_f = math.ldexp(min_f, -exp)
+        max_f = math.ldexp(max_f, -exp)
+    diff_f = v1_f - v2_f
+    term1_f = (v1_f - min_f) + (v2_f - min_f)
+    term2_f = (max_f - v1_f) + (max_f - v2_f)
+    return diff_f, term1_f, term2_f
 
 
 def bipolar_metric(
@@ -267,24 +319,21 @@ def bipolar_metric(
         if (v1 < v_min).any() or (v1 > v_max).any() or (v2 < v_min).any() or (v2 > v_max).any():  # ty:ignore[unsupported-operator]
             raise ValueError("The data contains out-of-bounds values for the specified bipolar endpoints.")
 
-        diff = _safe_diff(v1, v2)
-        term1 = _safe_diff(v1, v_min) + _safe_diff(v2, v_min)
-        term2 = _safe_diff(v_max, v1) + _safe_diff(v_max, v2)
-        nonzero = v1 != v2
         real_dtype = np.empty((), dtype=dtype).real.dtype
-        diff_f = np.asarray(diff, dtype=real_dtype)
-        term1_f = np.asarray(term1, dtype=real_dtype)
-        term2_f = np.asarray(term2, dtype=real_dtype)
+        calc_dtype = np.float64 if np.issubdtype(real_dtype, np.floating) and real_dtype.itemsize < 8 else real_dtype
+        diff_f, term1_f, term2_f = _bipolar_terms(v1, v2, v_min, v_max, calc_dtype)
+
+        nonzero = v1 != v2
         ratio1 = np.divide(
             diff_f,
             term1_f,
-            out=np.zeros(np.broadcast(v1, v2).shape, dtype=real_dtype),
+            out=np.zeros(np.broadcast(v1, v2).shape, dtype=calc_dtype),
             where=nonzero,
         )
         ratio2 = np.divide(
             diff_f,
             term2_f,
-            out=np.zeros(np.broadcast(v1, v2).shape, dtype=real_dtype),
+            out=np.zeros(np.broadcast(v1, v2).shape, dtype=calc_dtype),
             where=nonzero,
         )
         return (ratio1 * ratio2).astype(dtype)

@@ -392,6 +392,8 @@ def test_int64_min_max_span_overflow_prevention() -> None:
     dummy_nv = np.array([1.0])
     dist_circ = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert np.all(np.isfinite(dist_circ))
+    expected_circ = np.sin(np.pi / float(2**64)) ** 2
+    assert np.isclose(dist_circ[0], expected_circ, rtol=1e-12)
 
     bip_fn = bipolar_metric()
     dist_bip = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
@@ -402,11 +404,30 @@ def test_bipolar_extreme_scale_no_nan() -> None:
     bip_fn = bipolar_metric()
     dummy_idx = np.array([0])
     dummy_nv = np.array([1.0])
-    v1 = np.array([-1e200])
-    v2 = np.array([1e200])
+    v1 = np.array([-1e308])
+    v2 = np.array([1e308])
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert np.all(np.isfinite(dist))
     assert np.allclose(dist, 1.0)
+
+    # Relative distance check: midpoint to endpoint should be 1/3
+    bip_bounded = bipolar_metric(-1e308, 1e308)
+    v_mid = np.array([0.0])
+    dist_mid = bip_bounded(v_mid, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist_mid[0], 1.0 / 3.0)
+
+    # Low-precision dtype float32 with large scale
+    bip_f32 = bipolar_metric(-1e20, 1e20)
+    v1_32 = np.array([-1e20], dtype=np.float32)
+    v2_32 = np.array([0.0], dtype=np.float32)
+    dist_32 = bip_f32(v1_32, v2_32, dummy_idx, dummy_idx, dummy_nv, dtype=np.dtype(np.float32))
+    assert np.all(np.isfinite(dist_32))
+    assert np.isclose(dist_32[0], 1.0 / 3.0, rtol=1e-5)
+
+    # Krippendorff's alpha with extreme endpoints
+    data = np.array([[-1e308, 1e308], [-1e308, 1e308]])
+    res = alpha(data, level_of_measurement="bipolar")
+    assert np.isclose(res, 1.0)
 
 
 def test_numeric_strings_rejected_with_value_error() -> None:
