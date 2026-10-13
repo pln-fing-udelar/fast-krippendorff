@@ -388,6 +388,53 @@ def test_bootstrap_ci_degenerate_resamples_warning() -> None:
     assert np.isfinite(res.standard_error)
 
 
+def test_bootstrap_ci_default_measurement_level_is_interval(interval_data: list[list[float]]) -> None:
+    res = bootstrap_ci(interval_data, random_state=42)
+    point_interval = alpha(interval_data, level_of_measurement="interval")
+    assert np.isclose(res.alpha, point_interval)
+
+
+def test_norm_ppf_and_cdf_extreme_tails() -> None:
+    from krippendorff.krippendorff import _norm_cdf, _norm_ppf
+
+    # Extreme lower tail
+    p = 1e-12
+    z_low = _norm_ppf(p)
+    assert np.isclose(z_low, -7.034483825301133)
+    p_rec = _norm_cdf(z_low)
+    assert np.isclose(p_rec, p, rtol=1e-6)
+
+    # Upper tail via lower_tail=False
+    z_high = _norm_ppf(p, lower_tail=False)
+    assert np.isclose(z_high, 7.034483825301133)
+    assert np.isclose(z_low, -z_high)
+
+    # Extreme confidence level in normal method does not crash or raise
+    data = [[1, 2, 3], [1, 2, 3]]
+    res = bootstrap_ci(data, confidence_level=1.0 - 1e-10, method="normal", random_state=42)
+    assert np.isfinite(res.ci_low) and np.isfinite(res.ci_high)
+
+
+def test_bootstrap_ci_bca_jackknife_incomplete_fallback() -> None:
+    # 3 units: dropping unit 2 leaves [1, 1] and [1, 1], where expected disagreement is zero
+    data = [
+        [1, 1, 1],
+        [1, 1, 2],
+    ]
+    with pytest.warns(UserWarning, match="BCa jackknife acceleration could not be computed"):
+        res = bootstrap_ci(data, level_of_measurement="nominal", method="bca", random_state=42)
+    assert res.ci_low <= res.alpha <= res.ci_high
+
+
+def test_bootstrap_ci_large_domain_budgeting() -> None:
+    # Large domain V=100 with ordinal metric adjusts batch size safely below 50
+    rng = np.random.default_rng(42)
+    data = rng.integers(0, 100, size=(2, 10))
+    res = bootstrap_ci(data, level_of_measurement="ordinal", n_resamples=100, random_state=42)
+    assert np.isfinite(res.alpha)
+    assert res.ci_low <= res.ci_high
+
+
 def test_package_exports() -> None:
     assert hasattr(krippendorff, "bootstrap_ci")
     assert hasattr(krippendorff, "BootstrapResult")

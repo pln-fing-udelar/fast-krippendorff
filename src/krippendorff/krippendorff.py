@@ -1548,30 +1548,82 @@ def alpha(
 
 def _norm_cdf(x: float) -> float:
     """Cumulative distribution function of standard normal distribution."""
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+    if x < 0.0:
+        return 0.5 * math.erfc(-x / math.sqrt(2.0))
+    return 1.0 - 0.5 * math.erfc(x / math.sqrt(2.0))
 
 
-def _norm_ppf(p: float) -> float:
-    """Quantile function (inverse CDF) of standard normal distribution."""
+def _norm_ppf(p: float, *, lower_tail: bool = True) -> float:
+    """Quantile function (inverse CDF) of standard normal distribution.
+
+    Uses Acklam's rational approximation refined with Halley's method via erfc,
+    achieving full machine precision across extreme tails.
+    """
     if p <= 0.0 or p >= 1.0:
         raise ValueError("p must be in (0, 1).")
-    y = 2.0 * p - 1.0
-    s = 1.0 if y >= 0 else -1.0
-    ay = abs(y)
-    t = math.sqrt(max(0.0, -math.log(max(1e-300, 1.0 - ay**2))))
-    x = s * t * (1.0 - 0.1 * t)
-    sqrt_pi = math.sqrt(math.pi)
-    for _ in range(10):
-        fx = math.erf(x) - y
-        if abs(fx) < 1e-15:
+
+    if not lower_tail:
+        return -_norm_ppf(p, lower_tail=True)
+    if p > 0.5:
+        return -_norm_ppf(1.0 - p, lower_tail=True)
+
+    # Acklam's rational approximation coefficients for lower tail (p <= 0.5)
+    a = [
+        -3.969683028665376e01,
+        2.209460984245205e02,
+        -2.759285104469687e02,
+        1.383577518672690e02,
+        -3.066479806614716e01,
+        2.506628277459239e00,
+    ]
+    b = [
+        -5.447609879822406e01,
+        1.615858368580409e02,
+        -1.556989798598866e02,
+        6.680131188771972e01,
+        -1.328068155288572e01,
+    ]
+    c = [
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e00,
+        -2.549732539343734e00,
+        4.374664141464968e00,
+        2.938163982698783e00,
+    ]
+    d = [
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e00,
+        3.754408661907416e00,
+    ]
+
+    p_low = 0.02425
+    if p < p_low:
+        q = math.sqrt(-2.0 * math.log(p))
+        x = (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / (
+            (((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0
+        )
+    else:
+        q = p - 0.5
+        r = q * q
+        x = (
+            (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5])
+            * q
+            / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0)
+        )
+
+    # Halley's method refinement steps using erfc for extreme tail numerical stability
+    inv_sqrt2pi = 1.0 / math.sqrt(2.0 * math.pi)
+    for _ in range(2):
+        err = 0.5 * math.erfc(-x / math.sqrt(2.0)) - p
+        pdf = inv_sqrt2pi * math.exp(-0.5 * x * x)
+        if pdf == 0.0:
             break
-        dfx = (2.0 / sqrt_pi) * math.exp(-x * x)
-        ddfx = -2.0 * x * dfx
-        denom = 2.0 * dfx * dfx - fx * ddfx
-        if denom == 0.0:
-            break
-        x = x - (2.0 * fx * dfx) / denom
-    return x * math.sqrt(2.0)
+        delta = err / pdf
+        x = x - delta / (1.0 + 0.5 * x * delta)
+
+    return x
 
 
 def _get_rng(random_state: int | np.random.Generator | np.random.RandomState | None) -> np.random.Generator:
@@ -1674,24 +1726,23 @@ def _compute_bca_interval(
         valid_mask_j = valid_j & (de_j > 0.0)
         alpha_jack = np.where(valid_mask_j, 1.0 - do_j / np.maximum(de_j, 1e-300), np.nan)
 
-    valid_jack = alpha_jack[np.isfinite(alpha_jack)]
-
-    if len(valid_jack) < 2:
+    if not np.all(np.isfinite(alpha_jack)):
         warnings.warn(
-            "BCa jackknife acceleration could not be computed (fewer than 2 valid jackknife estimates); "
+            "BCa jackknife acceleration could not be computed (one or more leave-one-out estimates were undefined); "
             "falling back to percentile interval.",
             UserWarning,
             stacklevel=3,
         )
         return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
 
-    mean_j = float(np.mean(valid_jack))
-    diff_j = mean_j - valid_jack
+    mean_j = float(np.mean(alpha_jack))
+    diff_j = mean_j - alpha_jack
     denom_a = 6.0 * (float(np.sum(diff_j**2)) ** 1.5)
     a = float(np.sum(diff_j**3) / denom_a) if denom_a > 0.0 else 0.0
 
-    z_low = _norm_ppf((1.0 - confidence_level) / 2.0)
-    z_high = _norm_ppf(1.0 - (1.0 - confidence_level) / 2.0)
+    alpha_tail = (1.0 - confidence_level) / 2.0
+    z_low = _norm_ppf(alpha_tail)
+    z_high = -z_low
 
     denom_low = 1.0 - a * (z0 + z_low)
     denom_high = 1.0 - a * (z0 + z_high)
@@ -1725,7 +1776,7 @@ def bootstrap_ci(  # noqa: C901
     reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
-    level_of_measurement: LevelOfMeasurement = "nominal",
+    level_of_measurement: LevelOfMeasurement = "interval",
     dtype: npt.DTypeLike = DEFAULT_DTYPE,
     *,
     confidence_level: float = 0.95,
@@ -1754,7 +1805,7 @@ def bootstrap_ci(  # noqa: C901
         and V is the value domain length.
     value_domain : array_like, with shape (V,), optional
         Possible values the units can take. If None, it is inferred from data.
-    level_of_measurement : string or callable, default "nominal"
+    level_of_measurement : string or callable, default "interval"
         Metric for difference measurement. One of "nominal", "ordinal", "interval", "ratio", "circular",
         "bipolar", "polar", or a custom DistanceMetric callable. For custom callable metrics, distances
         are recomputed per bootstrap resample by default (since DistanceMetric accepts marginal counts n_v).
@@ -1895,7 +1946,8 @@ def bootstrap_ci(  # noqa: C901
 
     rng = _get_rng(random_state)
     p_units = [1.0 / n_units] * n_units
-    batch_size = min(n_resamples, max(50, 1_000_000 // max(n_units, 1)))
+    per_resample = n_units + (v_domain_len * v_domain_len if is_marginal_dep else v_domain_len)
+    batch_size = min(n_resamples, max(1, 1_000_000 // max(per_resample, 1)))
 
     o_units: npt.NDArray | None = None
     if is_marginal_dep:
@@ -1972,7 +2024,7 @@ def bootstrap_ci(  # noqa: C901
     se = float(np.std(valid_alphas, ddof=1))
 
     alpha_low_pct = 100.0 * (1.0 - confidence_level) / 2.0
-    alpha_high_pct = 100.0 * (1.0 - (1.0 - confidence_level) / 2.0)
+    alpha_high_pct = 100.0 - alpha_low_pct
 
     if method == "percentile":
         ci_low = float(np.percentile(valid_alphas, alpha_low_pct))
@@ -1981,7 +2033,8 @@ def bootstrap_ci(  # noqa: C901
         ci_low = float(2.0 * observed_alpha - np.percentile(valid_alphas, alpha_high_pct))
         ci_high = float(2.0 * observed_alpha - np.percentile(valid_alphas, alpha_low_pct))
     elif method == "normal":
-        z = _norm_ppf(1.0 - (1.0 - confidence_level) / 2.0)
+        alpha_tail = (1.0 - confidence_level) / 2.0
+        z = -_norm_ppf(alpha_tail)
         ci_low = float(observed_alpha - z * se)
         ci_high = float(observed_alpha + z * se)
     elif method == "bca":
