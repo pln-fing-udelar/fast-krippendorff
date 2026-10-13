@@ -305,7 +305,9 @@ def _circular_scaled_diff_scalar(a: Any, b: Any, u: Any) -> float:
         return min(r, u_f - r) / u_f
     if huge_u:
         u_int = int(u)
-        diff_mod = abs(_scale_val(a, u_int) - _scale_val(b, u_int)) % 1.0
+        a_red = int(a) % u_int if isinstance(a, (int, np.integer)) else a
+        b_red = int(b) % u_int if isinstance(b, (int, np.integer)) else b
+        diff_mod = abs(_scale_val(a_red, u_int) - _scale_val(b_red, u_int)) % 1.0
         return min(diff_mod, 1.0 - diff_mod)
     u_f = float(u)
     diff_mod = (_circular_residue(a, u) - _circular_residue(b, u)) % u_f
@@ -440,6 +442,17 @@ def _frexp_val(val: Any) -> tuple[float, int]:
             if val_int < 0:
                 m = -m
             return math.ldexp(m, -53), bits
+    if isinstance(val, Fraction):
+        if val == 0:
+            return 0.0, 0
+        sign = -1.0 if val < 0 else 1.0
+        abs_val = abs(val)
+        num_m, num_e = _frexp_val(abs_val.numerator)
+        den_m, den_e = _frexp_val(abs_val.denominator)
+        m = (num_m / den_m) * sign
+        e = num_e - den_e
+        norm_m, norm_e = math.frexp(m)
+        return norm_m, e + norm_e
     val_f = float(val)
     return math.frexp(val_f)
 
@@ -463,10 +476,60 @@ def _scale_bipolar_array(arr: Any, exp: int, dtype: np.dtype) -> npt.NDArray:
 
 def _max_exp_arr(arr: npt.NDArray) -> int:
     """Compute maximum binary exponent across array elements."""
-    if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype, np.integer):
-        max_v = float(np.max(np.abs(arr)))
+    arr_np = np.asarray(arr)
+    if np.issubdtype(arr_np.dtype, np.floating):
+        max_v = float(np.max(np.abs(arr_np)))
         return math.frexp(max_v)[1] if max_v > 0 else 0
-    return max((_frexp_val(x)[1] for x in arr.flat), default=0)
+    return max((_frexp_val(x)[1] for x in arr_np.flat), default=0)
+
+
+def _to_exact(x: Any) -> Any:
+    """Convert scalar to int or Fraction for exact arithmetic."""
+    if isinstance(x, (int, np.integer)):
+        return int(x)
+    if isinstance(x, Fraction):
+        return x
+    return Fraction(float(x))
+
+
+def _exact_sub(a: Any, b: Any) -> Any:
+    """Subtract two scalars preserving exact precision when integers/fractions are involved."""
+    res = _to_exact(a) - _to_exact(b)
+    return res.numerator if getattr(res, "denominator", 1) == 1 else res
+
+
+def _exact_add(a: Any, b: Any) -> Any:
+    """Add two scalars preserving exact precision when integers/fractions are involved."""
+    res = _to_exact(a) + _to_exact(b)
+    return res.numerator if getattr(res, "denominator", 1) == 1 else res
+
+
+def _safe_endpoint_gap(a: Any, b: Any) -> Any:
+    """Compute a - b preserving exact precision for integer and mixed operands."""
+    a_arr = np.asarray(a)
+    b_arr = np.asarray(b)
+    if np.issubdtype(a_arr.dtype, np.integer) and np.issubdtype(b_arr.dtype, np.integer):
+        return _safe_diff(a_arr, b_arr)
+    out_shape = np.broadcast(a_arr, b_arr).shape
+    out = np.empty(out_shape, dtype=object)
+    b_a, b_b = np.broadcast_arrays(a_arr, b_arr)
+    for idx in np.ndindex(out_shape):
+        out[idx] = _exact_sub(b_a[idx], b_b[idx])
+    return out
+
+
+def _safe_endpoint_sum(a: Any, b: Any) -> Any:
+    """Compute a + b preserving exact precision for integer and mixed operands."""
+    a_arr = np.asarray(a)
+    b_arr = np.asarray(b)
+    if np.issubdtype(a_arr.dtype, np.integer) and np.issubdtype(b_arr.dtype, np.integer):
+        return a_arr + b_arr
+    out_shape = np.broadcast(a_arr, b_arr).shape
+    out = np.empty(out_shape, dtype=object)
+    b_a, b_b = np.broadcast_arrays(a_arr, b_arr)
+    for idx in np.ndindex(out_shape):
+        out[idx] = _exact_add(b_a[idx], b_b[idx])
+    return out
 
 
 def _bipolar_terms(
@@ -510,30 +573,49 @@ def _bipolar_terms(
             np.asarray(ratio2, dtype=calc_dtype),
         )
 
-    min_m, min_exp = _frexp_val(v_min)
-    max_m, max_exp = _frexp_val(v_max)
-    calc_dt = np.dtype(calc_dtype)
-    max_v_exp = max(_max_exp_arr(v1), _max_exp_arr(v2))
+    is_pure_float = np.issubdtype(np.asarray(v1).dtype, np.floating) and np.issubdtype(
+        np.asarray(v2).dtype, np.floating
+    )
 
-    exp1 = max(min_exp, max_v_exp)
-    v1_1 = _scale_bipolar_array(v1, exp1, calc_dt)
-    v2_1 = _scale_bipolar_array(v2, exp1, calc_dt)
-    min_1 = math.ldexp(min_m, min_exp - exp1)
-    term1_f = (v1_1 - min_1) + (v2_1 - min_1)
+    if is_pure_float:
+        min_m, min_exp = _frexp_val(v_min)
+        max_m, max_exp = _frexp_val(v_max)
+        calc_dt = np.dtype(calc_dtype)
+        max_v_exp = max(_max_exp_arr(v1), _max_exp_arr(v2))
 
-    exp2 = max(max_exp, max_v_exp)
-    v1_2 = _scale_bipolar_array(v1, exp2, calc_dt)
-    v2_2 = _scale_bipolar_array(v2, exp2, calc_dt)
-    max_2 = math.ldexp(max_m, max_exp - exp2)
-    term2_f = (max_2 - v1_2) + (max_2 - v2_2)
+        exp1 = max(min_exp, max_v_exp)
+        v1_1 = _scale_bipolar_array(v1, exp1, calc_dt)
+        v2_1 = _scale_bipolar_array(v2, exp1, calc_dt)
+        min_1 = math.ldexp(min_m, min_exp - exp1)
+        term1_f = (v1_1 - min_1) + (v2_1 - min_1)
 
-    if not (np.issubdtype(np.asarray(v1).dtype, np.floating) and np.issubdtype(np.asarray(v2).dtype, np.floating)):
-        diff = _safe_diff(v1, v2)
-        diff_1 = _scale_bipolar_array(diff, exp1, calc_dt)
-        diff_2 = _scale_bipolar_array(diff, exp2, calc_dt)
-    else:
+        exp2 = max(max_exp, max_v_exp)
+        v1_2 = _scale_bipolar_array(v1, exp2, calc_dt)
+        v2_2 = _scale_bipolar_array(v2, exp2, calc_dt)
+        max_2 = math.ldexp(max_m, max_exp - exp2)
+        term2_f = (max_2 - v1_2) + (max_2 - v2_2)
+
         diff_1 = v1_1 - v2_1
         diff_2 = v1_2 - v2_2
+    else:
+        calc_dt = np.dtype(calc_dtype)
+        gap1_1 = _safe_endpoint_gap(v1, v_min_norm)
+        gap1_2 = _safe_endpoint_gap(v2, v_min_norm)
+        term1 = _safe_endpoint_sum(gap1_1, gap1_2)
+
+        gap2_1 = _safe_endpoint_gap(v_max_norm, v1)
+        gap2_2 = _safe_endpoint_gap(v_max_norm, v2)
+        term2 = _safe_endpoint_sum(gap2_1, gap2_2)
+
+        diff = _safe_endpoint_gap(v1, v2)
+
+        exp1 = max(_max_exp_arr(diff), _max_exp_arr(term1))
+        diff_1 = _scale_bipolar_array(diff, exp1, calc_dt)
+        term1_f = _scale_bipolar_array(term1, exp1, calc_dt)
+
+        exp2 = max(_max_exp_arr(diff), _max_exp_arr(term2))
+        diff_2 = _scale_bipolar_array(diff, exp2, calc_dt)
+        term2_f = _scale_bipolar_array(term2, exp2, calc_dt)
 
     ratio1 = np.divide(
         diff_1,

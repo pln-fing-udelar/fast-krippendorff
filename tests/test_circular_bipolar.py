@@ -797,3 +797,41 @@ def test_circular_fractional_circumference_mixed_domain_oversized_integer() -> N
         expected = np.sin(np.pi * min(d, 4.5 - d) / 4.5) ** 2
         assert np.isclose(dist[i, j], expected)
         assert np.isclose(dist[j, i], expected)
+
+
+def test_bipolar_large_lower_endpoint_small_gaps_exact() -> None:
+    low = -(2**1000)
+    high = 0.5
+    bip_fn = bipolar_metric(low=low, high=high)
+    a = low + 2**500
+    b = low + 2**501
+    v1 = np.array([a], dtype=object)
+    v2 = np.array([b], dtype=object)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    fa, fb, flo, fhi = Fraction(a), Fraction(b), Fraction(low), Fraction(high)
+    expected = float((fa - fb) ** 2 / ((fa + fb - 2 * flo) * (2 * fhi - fa - fb)))
+    assert expected > 0.0
+    assert np.isclose(dist[0], expected, rtol=1e-12, atol=0.0)
+
+
+def test_circular_huge_circumference_mixed_domain_integer_larger_than_circumference() -> None:
+    u = 2**2000
+    circ_fn = circular_metric(circumference=u)
+    domain = np.array([0.0, 2**4000 + 2**1999, 2**4000 + 2**1998], dtype=object)
+    v1 = domain[:, None]
+    v2 = domain[None, :]
+    dummy_idx = np.zeros(v1.shape, dtype=int)
+    dummy_nv = np.ones(v1.shape, dtype=float)
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.all(np.isfinite(dist))
+    # 2**4000 + 2**1999 mod 2**2000 is 2**1999 (half circumference, normalized diff 0.5 -> sin^2(pi*0.5) = 1.0)
+    assert np.isclose(dist[0, 1], 1.0)
+    assert np.isclose(dist[1, 0], 1.0)
+    # 2**4000 + 2**1998 mod 2**2000 is 2**1998 (quarter circumference, normalized diff 0.25 -> sin^2(pi*0.25) = 0.5)
+    assert np.isclose(dist[0, 2], 0.5)
+    assert np.isclose(dist[2, 0], 0.5)
+    # Difference between 2**1999 and 2**1998 is 2**1998 (quarter circumference -> 0.5)
+    assert np.isclose(dist[1, 2], 0.5)
+    assert np.isclose(dist[2, 1], 0.5)
