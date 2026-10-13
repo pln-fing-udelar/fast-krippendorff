@@ -1,4 +1,5 @@
 [![Actions Status](https://github.com/pln-fing-udelar/fast-krippendorff/workflows/CI/badge.svg)](https://github.com/pln-fing-udelar/fast-krippendorff/actions)
+[![Coverage](https://codecov.io/gh/pln-fing-udelar/fast-krippendorff/branch/main/graph/badge.svg)](https://codecov.io/gh/pln-fing-udelar/fast-krippendorff)
 [![Version](https://img.shields.io/pypi/v/krippendorff.svg)](https://pypi.python.org/pypi/krippendorff)
 [![License](https://img.shields.io/pypi/l/krippendorff.svg)](https://pypi.python.org/pypi/krippendorff)
 [![Supported Python versions](https://img.shields.io/pypi/pyversions/krippendorff.svg)](https://pypi.python.org/pypi/krippendorff)
