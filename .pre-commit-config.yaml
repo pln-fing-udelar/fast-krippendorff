@@ -1,0 +1,28 @@
+repos:
+  - repo: local
+    # We ensure all tools come from the environment and use uv.
+    hooks:
+      # Ruff is run only on modified files to avoid forcing repo-wide changes during commits.
+      - id: lint_fix
+        name: lint fix
+        description: "Lint"
+        entry: uv run --frozen ruff check --fix --force-exclude
+        language: system
+        types_or: [ python, pyi, jupyter ]
+        require_serial: true
+      - id: format
+        name: format
+        description: "Format"
+        entry: uv run --frozen ruff format --force-exclude
+        language: system
+        types_or: [ python, pyi, jupyter ]
+        require_serial: true
+      # ty checks the full configured project to catch type errors in unchanged callers/dependents.
+      - id: types
+        name: types
+        description: "Check types"
+        entry: uv run --frozen ty check
+        language: system
+        pass_filenames: false
+        types_or: [ python, pyi, jupyter ]
+        require_serial: true
