@@ -2,10 +2,7 @@ repos:
   - repo: local
     # We ensure all tools come from the environment and use uv.
     hooks:
-      # We could run the following tools for all the files instead of only the modified ones.
-      # It'd make sense when updating the dependencies (ruff and ty).
-      # However, that'd be annoying, as the user may need to change the whole codebase to commit.
-      # It's better to let it fail during the CI.
+      # Ruff is run only on modified files to avoid forcing repo-wide changes during commits.
       - id: lint_fix
         name: lint fix
         description: "Lint"
@@ -20,6 +17,7 @@ repos:
         language: system
         types_or: [ python, pyi, jupyter ]
         require_serial: true
+      # ty checks the full configured project to catch type errors in unchanged callers/dependents.
       - id: types
         name: types
         description: "Check types"
