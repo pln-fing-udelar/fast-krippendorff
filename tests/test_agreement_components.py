@@ -53,8 +53,8 @@ def test_return_components_nominal() -> None:
     assert isinstance(res, AlphaResult)
     assert np.isclose(res.alpha, single_alpha)
     assert np.isclose(res.alpha, 0.691358024691358)
-    assert res.d_o > 0
-    assert res.d_e > 0
+    assert np.isclose(res.d_o, 3 / 13)
+    assert np.isclose(res.d_e, 243 / 325)
     assert np.isclose(res.alpha, 1.0 - res.d_o / res.d_e)
     assert res.do == res.d_o
     assert res.de == res.d_e

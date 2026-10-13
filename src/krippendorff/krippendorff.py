@@ -1097,7 +1097,7 @@ def alpha(
     value_counts: npt.ArrayLike | None = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
-    dtype: npt.DTypeLike = ...,
+    dtype: type[float] | np.dtype[np.floating] = ...,
     *,
     all_reliability_data: npt.ArrayLike | None = ...,
     all_value_counts: npt.ArrayLike | None = ...,
@@ -1117,8 +1117,23 @@ def alpha(
     all_reliability_data: npt.ArrayLike | None = ...,
     all_value_counts: npt.ArrayLike | None = ...,
     random_coincidences: npt.ArrayLike | None = ...,
+    return_components: Literal[False] = ...,
+) -> float | complex | np.inexact: ...
+
+
+@overload
+def alpha(
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    value_counts: npt.ArrayLike | None = ...,
+    value_domain: npt.ArrayLike | None = ...,
+    level_of_measurement: LevelOfMeasurement = ...,
+    dtype: npt.DTypeLike = ...,
+    *,
+    all_reliability_data: npt.ArrayLike | None = ...,
+    all_value_counts: npt.ArrayLike | None = ...,
+    random_coincidences: npt.ArrayLike | None = ...,
     return_components: Literal[True],
-) -> AlphaResult: ...
+) -> AlphaResult[Any]: ...
 
 
 @overload
@@ -1133,7 +1148,7 @@ def alpha(
     all_value_counts: npt.ArrayLike | None = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: bool,
-) -> float | AlphaResult: ...
+) -> float | complex | np.inexact | AlphaResult[Any]: ...
 
 
 def alpha(  # noqa: C901
