@@ -741,3 +741,16 @@ def test_bipolar_oversized_integers_in_mixed_domain() -> None:
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert not np.isnan(dist[0])
     assert dist[0] > 0.0
+
+
+def test_bipolar_object_domain_with_numpy_int64_extremes_no_wraparound() -> None:
+    lo = np.int64(np.iinfo(np.int64).min)
+    hi = np.int64(np.iinfo(np.int64).max)
+    bip_fn = bipolar_metric()
+    domain = np.array([lo, hi, 0.5], dtype=object)
+    v1 = domain[:, None]
+    v2 = domain[None, :]
+    dummy_idx = np.zeros(v1.shape, dtype=int)
+    dummy_nv = np.ones(v1.shape, dtype=float)
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert np.isclose(dist[0, 1], 1.0)

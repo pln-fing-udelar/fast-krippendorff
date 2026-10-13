@@ -219,6 +219,21 @@ def _to_int_if_integral(x: Any) -> Any:
     return x
 
 
+def _normalize_object_integers(x: Any) -> Any:
+    """Convert NumPy integer scalars (standalone or inside object arrays) to Python ints."""
+    if isinstance(x, np.integer):
+        return int(x)
+    x_arr = np.asarray(x)
+    if np.issubdtype(x_arr.dtype, np.integer):
+        return _to_object_int(x_arr)
+    if x_arr.dtype == object:
+        out = np.empty(x_arr.shape, dtype=object)
+        for i, val in enumerate(x_arr.flat):
+            out.flat[i] = int(val) if isinstance(val, np.integer) else val
+        return out
+    return x
+
+
 def _safe_diff(a: Any, b: Any) -> Any:
     """Compute difference safely, avoiding integer underflow/overflow and precision loss."""
     a_arr = np.asarray(a)
@@ -229,7 +244,7 @@ def _safe_diff(a: Any, b: Any) -> Any:
         if a_arr.dtype in (np.int64, np.uint64) or b_arr.dtype in (np.int64, np.uint64):
             return _to_object_int(a) - _to_object_int(b)
         return np.asarray(a, dtype=np.int64) - np.asarray(b, dtype=np.int64)
-    return a - b
+    return _normalize_object_integers(a) - _normalize_object_integers(b)
 
 
 def _scale_val(val: Any, u: int) -> float:
