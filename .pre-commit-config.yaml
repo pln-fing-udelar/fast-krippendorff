@@ -2,6 +2,10 @@ repos:
   - repo: local
     # We ensure all tools come from the environment and use uv.
     hooks:
+      # We could run the following tools for all the files instead of only the modified ones.
+      # It'd make sense when updating the dependencies (ruff and ty).
+      # However, that'd be annoying, as the user may need to change the whole codebase to commit.
+      # It's better to let it fail during the CI.
       - id: lint_fix
         name: lint fix
         description: "Lint"
@@ -19,7 +23,8 @@ repos:
       - id: types
         name: types
         description: "Check types"
-        entry: uv run --frozen ty check --force-exclude
+        entry: uv run --frozen ty check
         language: system
+        pass_filenames: false
         types_or: [ python, pyi, jupyter ]
         require_serial: true
