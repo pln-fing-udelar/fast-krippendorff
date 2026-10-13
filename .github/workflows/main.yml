@@ -28,9 +28,6 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
     strategy:
       matrix:
         python-version: [ '3.11', '3.12', '3.13', '3.13t', '3.14', '3.14t', '3.15', '3.15t' ]
@@ -49,13 +46,35 @@ jobs:
         run: uv sync --resolution ${{ matrix.resolution-strategy }}
       - name: Test
         run: uv run pytest --doctest-modules --cov=krippendorff --cov-fail-under=90 --cov-report=xml
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.11' && matrix.resolution-strategy == 'highest'
+        with:
+          name: coverage-report
+          path: test-reports/coverage.xml
+          if-no-files-found: error
+      - name: Run example
+        run: uv run python example.py
+
+  upload-coverage:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: test-reports
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
-        if: matrix.python-version == '3.11' && matrix.resolution-strategy == 'highest'
         with:
           files: ./test-reports/coverage.xml
           use_oidc: true
           fail_ci_if_error: false
-      - name: Run example
-        run: uv run python example.py
+
 
