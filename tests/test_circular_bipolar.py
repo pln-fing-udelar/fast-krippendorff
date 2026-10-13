@@ -835,3 +835,31 @@ def test_circular_huge_circumference_mixed_domain_integer_larger_than_circumfere
     # Difference between 2**1999 and 2**1998 is 2**1998 (quarter circumference -> 0.5)
     assert np.isclose(dist[1, 2], 0.5)
     assert np.isclose(dist[2, 1], 0.5)
+
+
+def test_bipolar_large_lower_bound_float_comparison() -> None:
+    # 2**1023 is ~8.99e307, 1e308 is strictly greater than 2**1023.
+    low = 2**1023
+    high = 2**1024
+    bip_fn = bipolar_metric(low=low, high=high)
+    v1 = np.array([1e308])
+    v2 = np.array([1e308])
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    # 1e308 is inside [2**1023, 2**1024], so it should NOT be rejected.
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    assert dist[0] == 0.0
+
+    # A value strictly smaller than 2**1023 (e.g. 1e307) should be rejected.
+    with pytest.raises(ValueError, match="out-of-bounds"):
+        bip_fn(np.array([1e307]), v2, dummy_idx, dummy_idx, dummy_nv)
+
+    # Upper bound test: negative endpoints with -1e308
+    low_neg = -(2**1024)
+    high_neg = -(2**1023)
+    bip_fn_neg = bipolar_metric(low=low_neg, high=high_neg)
+    dist_neg = bip_fn_neg(np.array([-1e308]), np.array([-1e308]), dummy_idx, dummy_idx, dummy_nv)
+    assert dist_neg[0] == 0.0
+
+    with pytest.raises(ValueError, match="out-of-bounds"):
+        bip_fn_neg(np.array([-1e307]), np.array([-1e308]), dummy_idx, dummy_idx, dummy_nv)

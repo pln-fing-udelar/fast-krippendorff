@@ -643,40 +643,42 @@ def _normalize_endpoint(val: Any, name: str) -> Any:
     return _to_int_if_integral(val)
 
 
+def _scalar_less_than(x: Any, b: Any) -> bool:
+    """Compare scalar x < b preserving arbitrary-precision integer comparisons."""
+    if isinstance(x, (int, np.integer)):
+        return int(x) < b
+    if isinstance(x, (float, np.floating)):
+        return float(x) < b
+    return bool(x < b)
+
+
+def _scalar_greater_than(x: Any, b: Any) -> bool:
+    """Compare scalar x > b preserving arbitrary-precision integer comparisons."""
+    if isinstance(x, (int, np.integer)):
+        return int(x) > b
+    if isinstance(x, (float, np.floating)):
+        return float(x) > b
+    return bool(x > b)
+
+
 def _val_less_than(arr: npt.NDArray, bound: Any) -> bool:
     """Check if any element in arr is strictly less than bound, avoiding OverflowError."""
     if isinstance(bound, (int, np.integer)) and int(bound).bit_length() >= 1024:
-        bound_int = int(bound)
-        if bound_int > 0:
-            if arr.dtype == object:
-                return any(x < bound_int for x in arr.flat)
-            return True
-        else:
-            if arr.dtype == object:
-                return any(x < bound_int for x in arr.flat)
-            return False
+        return any(_scalar_less_than(x, bound) for x in arr.flat)
     try:
         return bool((arr < bound).any())
-    except OverflowError:
-        return any(x < bound for x in arr.flat)
+    except (OverflowError, TypeError):
+        return any(_scalar_less_than(x, bound) for x in arr.flat)
 
 
 def _val_greater_than(arr: npt.NDArray, bound: Any) -> bool:
     """Check if any element in arr is strictly greater than bound, avoiding OverflowError."""
     if isinstance(bound, (int, np.integer)) and int(bound).bit_length() >= 1024:
-        bound_int = int(bound)
-        if bound_int > 0:
-            if arr.dtype == object:
-                return any(x > bound_int for x in arr.flat)
-            return False
-        else:
-            if arr.dtype == object:
-                return any(x > bound_int for x in arr.flat)
-            return True
+        return any(_scalar_greater_than(x, bound) for x in arr.flat)
     try:
         return bool((arr > bound).any())
-    except OverflowError:
-        return any(x > bound for x in arr.flat)
+    except (OverflowError, TypeError):
+        return any(_scalar_greater_than(x, bound) for x in arr.flat)
 
 
 def bipolar_metric(
