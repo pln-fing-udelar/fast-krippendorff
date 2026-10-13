@@ -458,9 +458,12 @@ def _frexp_val(val: Any) -> tuple[float, int]:
     return math.frexp(val_f)
 
 
-def _scale_val_by_exp(val: Any, exp: int) -> float:
+def _scale_val_by_exp(val: Any, exp: int, dtype: npt.DTypeLike = DEFAULT_DTYPE) -> Any:
     """Scale a scalar val by 2**(-exp)."""
     m, e = _frexp_val(val)
+    dtype_obj = np.dtype(dtype)
+    if np.issubdtype(dtype_obj, np.floating) and dtype_obj.itemsize > 8:
+        return np.ldexp(dtype_obj.type(m), e - exp)
     return math.ldexp(m, e - exp)
 
 
@@ -471,7 +474,7 @@ def _scale_bipolar_array(arr: Any, exp: int, dtype: np.dtype) -> npt.NDArray:
         return np.asarray(np.ldexp(arr_np.astype(dtype), -exp), dtype=dtype)
     out = np.zeros(arr_np.shape, dtype=dtype)
     for i, val in enumerate(arr_np.flat):
-        out.flat[i] = _scale_val_by_exp(val, exp)
+        out.flat[i] = _scale_val_by_exp(val, exp, dtype)
     return out
 
 
@@ -545,34 +548,8 @@ def _bipolar_terms(
     v2 = _to_pure_integer_if_all_integral(v2)
     v_min_norm = _to_int_if_integral(v_min)
     v_max_norm = _to_int_if_integral(v_max)
-    is_int_domain = (
-        _is_all_pure_integer(v1)
-        and _is_all_pure_integer(v2)
-        and isinstance(v_min_norm, (int, np.integer))
-        and isinstance(v_max_norm, (int, np.integer))
-    )
     nonzero = v1 != v2
     out_shape = np.broadcast(v1, v2).shape
-    if is_int_domain:
-        diff = _safe_diff(v1, v2)
-        term1 = _safe_diff(v1, v_min_norm) + _safe_diff(v2, v_min_norm)
-        term2 = _safe_diff(v_max_norm, v1) + _safe_diff(v_max_norm, v2)
-        ratio1 = np.divide(
-            diff,
-            term1,
-            out=np.zeros(out_shape, dtype=object),
-            where=nonzero & (term1 != 0),
-        )
-        ratio2 = np.divide(
-            diff,
-            term2,
-            out=np.zeros(out_shape, dtype=object),
-            where=nonzero & (term2 != 0),
-        )
-        return (
-            np.asarray(ratio1, dtype=calc_dtype),
-            np.asarray(ratio2, dtype=calc_dtype),
-        )
 
     is_pure_float = np.issubdtype(np.asarray(v1).dtype, np.floating) and np.issubdtype(
         np.asarray(v2).dtype, np.floating
@@ -843,7 +820,7 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
     ----------
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", or a callable.
+        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", "polar", or a callable.
 
     Returns
     -------
@@ -1103,7 +1080,7 @@ def alpha(  # noqa: C901
 
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", or a callable.
+        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", "polar", or a callable.
 
     dtype : data-type
         Result and computation data-type.

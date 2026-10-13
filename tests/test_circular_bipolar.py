@@ -879,3 +879,14 @@ def test_polar_metric_alias_for_bipolar() -> None:
     alpha_bipolar_fn = alpha(data, level_of_measurement=bipolar_metric(low=-2, high=2))
     alpha_polar_fn = alpha(data, level_of_measurement=polar_metric(low=-2, high=2))
     assert alpha_polar_fn == alpha_bipolar_fn
+
+
+def test_bipolar_integer_scale_longdouble_precision() -> None:
+    high = 10**400
+    bip_fn = bipolar_metric(low=0, high=high)
+    v1 = np.array([0])
+    v2 = np.array([1])
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv, dtype=np.dtype(np.longdouble))
+    assert dist[0] > 0.0
