@@ -11,7 +11,7 @@ import math
 import numbers
 from collections.abc import Mapping, Sequence
 from fractions import Fraction
-from typing import Any, Literal, NamedTuple, Protocol, TypeVar, overload
+from typing import Any, Generic, Literal, NamedTuple, Protocol, TypeVar, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -33,30 +33,33 @@ __all__ = [
 ]
 
 
-class AlphaResult(NamedTuple):
+ResultScalarType = TypeVar("ResultScalarType", bound=float | complex | np.inexact)
+
+
+class AlphaResult(NamedTuple, Generic[ResultScalarType]):
     """Result of Krippendorff's alpha calculation when agreement components are requested.
 
     Attributes
     ----------
-    alpha : float
+    alpha : float, complex, or np.inexact
         Krippendorff's alpha agreement measure.
-    d_o : float
+    d_o : float, complex, or np.inexact
         Observed disagreement ($D_o$).
-    d_e : float
+    d_e : float, complex, or np.inexact
         Expected disagreement ($D_e$) under chance agreement.
     """
 
-    alpha: float
-    d_o: float
-    d_e: float
+    alpha: ResultScalarType
+    d_o: ResultScalarType
+    d_e: ResultScalarType
 
     @property
-    def do(self) -> float:
+    def do(self) -> ResultScalarType:
         """Alias for `d_o` (observed disagreement)."""
         return self.d_o
 
     @property
-    def de(self) -> float:
+    def de(self) -> ResultScalarType:
         """Alias for `d_e` (expected disagreement)."""
         return self.d_e
 
@@ -1144,7 +1147,7 @@ def alpha(  # noqa: C901
     all_value_counts: npt.ArrayLike | None = None,
     random_coincidences: npt.ArrayLike | None = None,
     return_components: bool = False,
-) -> float | AlphaResult:
+) -> Any:
     """Compute Krippendorff's alpha.
 
     See https://en.wikipedia.org/wiki/Krippendorff%27s_alpha for more information.
@@ -1206,7 +1209,7 @@ def alpha(  # noqa: C901
 
     Returns
     -------
-    alpha : float or AlphaResult
+    alpha : float, complex, np.inexact, or AlphaResult
         Scalar value of Krippendorff's alpha of type `dtype`, or an `AlphaResult` named tuple
         containing `(alpha, d_o, d_e)` if `return_components=True`.
 

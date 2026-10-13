@@ -171,3 +171,20 @@ def test_return_components_with_subsamples() -> None:
     assert isinstance(res, AlphaResult)
     assert np.isclose(res.alpha, single_alpha)
     assert np.isclose(res.alpha, 1.0 - res.d_o / res.d_e)
+
+
+def test_return_components_complex_dtype() -> None:
+    """Verify return_components with complex computation dtype."""
+    circ_data = [[0, 1, 2, 3], [0, 2, 2, 0]]
+    res = krippendorff.alpha(
+        circ_data,
+        level_of_measurement="circular",
+        dtype=np.complex128,
+        return_components=True,
+    )
+    assert isinstance(res, AlphaResult)
+    assert isinstance(res.alpha, (complex, np.complexfloating))
+    assert isinstance(res.d_o, (complex, np.complexfloating))
+    assert isinstance(res.d_e, (complex, np.complexfloating))
+    assert round(res.alpha.real, 6) == 0.5625
+    assert np.isclose(res.alpha, 1.0 - res.d_o / res.d_e)
