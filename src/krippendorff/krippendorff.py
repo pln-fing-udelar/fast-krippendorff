@@ -83,9 +83,9 @@ class BootstrapResult(NamedTuple):
         Bootstrap standard error of alpha (sample standard deviation of bootstrap replicates).
     q_value : float or None
         Krippendorff's q-value: empirical probability that the true reliability falls below
-        `alternative_threshold` ($q = P(\alpha^* < \alpha_{\text{min}})$). When degenerate resamples
+        `alternative_threshold` ($q = P(\\alpha^* < \\alpha_{\\text{min}})$). When degenerate resamples
         occur (omitted with a warning), $q$ is estimated conditionally over all valid resamples:
-        $P(\alpha^* < \alpha_{\text{min}} \\mid \alpha^* \text{ is defined})$.
+        $P(\\alpha^* < \\alpha_{\\text{min}} \\mid \\alpha^* \\text{ is defined})$.
         None if `alternative_threshold` was not provided.
     resamples : ndarray or None
         Array of bootstrap estimates of shape `(n_resamples,)` if `return_distribution` is True,
@@ -1826,11 +1826,11 @@ def bootstrap_ci(  # noqa: C901
     n_resamples : int, default 2000
         Number of bootstrap resamples to draw.
     alternative_threshold : float, optional
-        Acceptable reliability benchmark $\alpha_{\text{min}}$ (e.g. 0.800 or 0.667).
+        Acceptable reliability benchmark $\\alpha_{\\text{min}}$ (e.g. 0.800 or 0.667).
         When specified, calculates Krippendorff's $q$-value: the empirical probability
-        $q = P(\alpha^* < \alpha_{\text{min}})$ that true reliability fails to reach the threshold.
+        $q = P(\\alpha^* < \\alpha_{\\text{min}})$ that true reliability fails to reach the threshold.
         When degenerate resamples occur (omitted with a warning), $q$ is estimated conditionally
-        over all valid resamples: $P(\alpha^* < \alpha_{\text{min}} \\mid \alpha^* \text{ is defined})$.
+        over all valid resamples: $P(\\alpha^* < \\alpha_{\\text{min}} \\mid \\alpha^* \\text{ is defined})$.
     method : {"percentile", "bca", "basic", "normal"}, default "percentile"
         Bootstrap confidence interval method:
         - "percentile": Empirical percentiles of bootstrap distribution (standard in Krippendorff literature).
@@ -1892,6 +1892,8 @@ def bootstrap_ci(  # noqa: C901
             raise ValueError("alternative_threshold must be a finite real number.")
 
     dtype_dt = np.dtype(dtype)
+    if not np.issubdtype(dtype_dt, np.inexact):
+        raise ValueError("`dtype` must be an inexact type.")
     if np.issubdtype(dtype_dt, np.complexfloating):
         raise ValueError("bootstrap_ci does not support complex dtypes.")
 

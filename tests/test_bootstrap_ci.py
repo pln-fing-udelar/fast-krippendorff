@@ -144,6 +144,30 @@ def test_bootstrap_ci_ordinal(ordinal_data: list[list[float]]) -> None:
     assert res_bca.ci_low < res_bca.alpha < res_bca.ci_high
 
 
+def test_bootstrap_ci_ordinal_replicates_exact_match(ordinal_data: list[list[float]]) -> None:
+    data_arr = np.array(ordinal_data)
+    n_units = data_arr.shape[1]
+    n_resamples = 10
+
+    res = bootstrap_ci(
+        data_arr,
+        level_of_measurement="ordinal",
+        n_resamples=n_resamples,
+        random_state=42,
+        return_distribution=True,
+    )
+    assert res.resamples is not None
+
+    rng = np.random.default_rng(42)
+    w_draws = rng.multinomial(n_units, [1.0 / n_units] * n_units, size=n_resamples)
+
+    for b in range(n_resamples):
+        resampled_cols = np.repeat(np.arange(n_units), w_draws[b])
+        resampled_data = data_arr[:, resampled_cols]
+        expected_alpha = alpha(resampled_data, level_of_measurement="ordinal")
+        assert np.isclose(res.resamples[b], expected_alpha)
+
+
 def test_bootstrap_ci_interval(interval_data: list[list[float]]) -> None:
     res = bootstrap_ci(interval_data, level_of_measurement="interval", random_state=42)
     point = alpha(interval_data, level_of_measurement="interval")
@@ -338,6 +362,10 @@ def test_bootstrap_ci_validation_errors(nominal_data: list[list[float]]) -> None
     # Invalid method
     with pytest.raises(ValueError, match="Invalid method 'invalid'"):
         bootstrap_ci(nominal_data, method="invalid")  # ty:ignore[invalid-argument-type]
+
+    # Non-inexact dtype
+    with pytest.raises(ValueError, match="`dtype` must be an inexact type"):
+        bootstrap_ci(nominal_data, dtype=int)
 
     # Complex dtype
     with pytest.raises(ValueError, match="bootstrap_ci does not support complex dtypes"):
