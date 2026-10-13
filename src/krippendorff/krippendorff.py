@@ -1578,6 +1578,24 @@ def _get_rng(random_state: int | np.random.Generator | np.random.RandomState | N
     raise ValueError(f"Invalid random_state: {random_state!r}. Expected int, Generator, RandomState, or None.")
 
 
+def _is_metric_marginal_dependent(
+    metric_spec: LevelOfMeasurement,
+    domain: npt.NDArray,
+    n_v: npt.NDArray,
+    dtype: np.dtype,
+) -> bool:
+    """Check whether the distance metric depends on marginal counts n_v."""
+    if metric_spec == "ordinal":
+        return True
+    if isinstance(metric_spec, str):
+        return False
+    # Custom DistanceMetric callable: probe with n_v and n_v + 1
+    metric = _distance_metric(metric_spec)
+    d1 = _distances(domain, metric, n_v, dtype=dtype)
+    d2 = _distances(domain, metric, n_v + 1, dtype=dtype)
+    return not np.allclose(d1, d2)
+
+
 def _compute_bca_interval(
     valid_alphas: npt.NDArray[np.floating],
     observed_alpha: float,
@@ -1588,6 +1606,11 @@ def _compute_bca_interval(
     d: npt.NDArray,
     de_fixed: float | None,
     fallback_pct: tuple[float, float],
+    domain: npt.NDArray | None = None,
+    distance_metric: DistanceMetric | None = None,
+    o_units: npt.NDArray | None = None,
+    dtype: np.dtype = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
+    is_marginal_dependent: bool = False,
 ) -> tuple[float, float]:
     """Compute Bias-Corrected and Accelerated (BCa) bootstrap confidence interval."""
     n_units = len(num_u)
@@ -1599,23 +1622,49 @@ def _compute_bca_interval(
     prop = min(max(prop, 1.0 / (2.0 * n_boot)), 1.0 - 1.0 / (2.0 * n_boot))
     z0 = _norm_ppf(prop)
 
-    w_jack = np.ones((n_units, n_units), dtype=float) - np.eye(n_units, dtype=float)
-    num_j = w_jack @ num_u
-    n_j = w_jack @ den_u
+    # Compute jackknife leave-one-out totals in linear memory without constructing an (N x N) matrix
+    total_den = float(np.sum(den_u))
+    n_j = total_den - den_u
     valid_j = n_j > 1
     safe_nj = np.maximum(n_j, 2)
-    do_j = np.where(valid_j, num_j / safe_nj, np.nan)
 
-    if de_fixed is not None:
-        de_j = np.full(n_units, de_fixed, dtype=float)
+    if is_marginal_dependent:
+        assert o_units is not None and domain is not None and distance_metric is not None
+        o_total = np.sum(o_units, axis=0)
+        total_nv = np.sum(nv_matrix, axis=0)
+        alpha_jack = np.empty(n_units, dtype=float)
+        for u in range(n_units):
+            nu = n_j[u]
+            if nu <= 1:
+                alpha_jack[u] = np.nan
+                continue
+            nv_u = total_nv - nv_matrix[u]
+            ou = o_total - o_units[u]
+            eu = _random_coincidences(nv_u, dtype=dtype)
+            du = _distances(domain, distance_metric, nv_u, dtype=dtype)
+            deu = (eu * du).sum() / nu
+            if deu == 0.0:
+                alpha_jack[u] = np.nan
+                continue
+            dou = (ou * du).sum() / nu
+            alpha_jack[u] = 1.0 - dou / deu
+    elif de_fixed is not None:
+        total_num = float(np.sum(num_u))
+        num_j = total_num - num_u
+        do_j = np.where(valid_j, num_j / safe_nj, np.nan)
+        alpha_jack = np.where(valid_j, 1.0 - do_j / de_fixed, np.nan)
     else:
-        nv_j = w_jack @ nv_matrix
+        total_num = float(np.sum(num_u))
+        num_j = total_num - num_u
+        total_nv = np.sum(nv_matrix, axis=0)
+        nv_j = total_nv - nv_matrix
+        do_j = np.where(valid_j, num_j / safe_nj, np.nan)
         quad_j = np.sum((nv_j @ d) * nv_j, axis=1)
         diag_j = nv_j @ np.diag(d)
         de_j = np.where(valid_j, (quad_j - diag_j) / (safe_nj * (safe_nj - 1)), 0.0)
+        valid_mask_j = valid_j & (de_j > 0.0)
+        alpha_jack = np.where(valid_mask_j, 1.0 - do_j / np.maximum(de_j, 1e-300), np.nan)
 
-    valid_mask_j = valid_j & (de_j > 0.0)
-    alpha_jack = np.where(valid_mask_j, 1.0 - do_j / np.maximum(de_j, 1e-300), np.nan)
     valid_jack = alpha_jack[np.isfinite(alpha_jack)]
 
     if len(valid_jack) < 2:
@@ -1793,7 +1842,11 @@ def bootstrap_ci(  # noqa: C901
     )
     d = _distances(domain, distance_metric, dist_n_v, dtype=dtype_dt)
 
-    n_units, _ = counts.shape
+    is_marginal_dep = de_fixed is None and _is_metric_marginal_dependent(
+        level_of_measurement, domain, dist_n_v, dtype_dt
+    )
+
+    n_units, v_domain_len = counts.shape
     pairable = counts.sum(axis=1)
     valid_units = pairable >= 2
     safe_denom = np.maximum(pairable - 1, 1)[:, np.newaxis]
@@ -1804,27 +1857,56 @@ def bootstrap_ci(  # noqa: C901
     wd = weights @ d.T
     num_u = np.sum(counts * wd, axis=1) - np.sum(weights * np.diag(d), axis=1)
 
+    counts_3d = counts[:, :, np.newaxis]
+    weights_3d = weights[:, np.newaxis, :]
+    o_units = counts_3d * weights_3d
+    diag_idx = np.arange(v_domain_len)
+    o_units[:, diag_idx, diag_idx] = (counts - 1) * weights
+    o_units = np.where(valid_units[:, np.newaxis, np.newaxis], o_units, 0.0)
+
     rng = _get_rng(random_state)
     w_samples = rng.multinomial(n_units, [1.0 / n_units] * n_units, size=n_resamples)
 
-    num_star = w_samples @ num_u
-    n_star = w_samples @ den_u
-    nv_star = w_samples @ nv_matrix
+    if is_marginal_dep:
+        o_star = np.tensordot(w_samples, o_units, axes=(1, 0))
+        nv_star = o_star.sum(axis=-1)
+        n_star = nv_star.sum(axis=-1)
 
-    valid_n = n_star > 1
-    safe_n = np.maximum(n_star, 2)
-    do_star = np.where(valid_n, num_star / safe_n, np.nan)
-
-    if de_fixed is not None:
-        de_star = np.full(n_resamples, de_fixed, dtype=float)
+        alpha_star = np.empty(n_resamples, dtype=float)
+        for b in range(n_resamples):
+            nb = n_star[b]
+            if nb <= 1:
+                alpha_star[b] = np.nan
+                continue
+            nv_b = nv_star[b]
+            o_b = o_star[b]
+            e_b = _random_coincidences(nv_b, dtype=dtype_dt)
+            d_b = _distances(domain, distance_metric, nv_b, dtype=dtype_dt)
+            deb = (e_b * d_b).sum() / nb
+            if deb == 0.0:
+                alpha_star[b] = np.nan
+                continue
+            dob = (o_b * d_b).sum() / nb
+            alpha_star[b] = 1.0 - dob / deb
     else:
-        quad = np.sum((nv_star @ d) * nv_star, axis=1)
-        diag_term = nv_star @ np.diag(d)
-        de_denom = safe_n * (safe_n - 1)
-        de_star = np.where(valid_n, (quad - diag_term) / de_denom, 0.0)
+        num_star = w_samples @ num_u
+        n_star = w_samples @ den_u
+        nv_star = w_samples @ nv_matrix
 
-    valid_mask = valid_n & (de_star > 0.0)
-    alpha_star = np.where(valid_mask, 1.0 - do_star / np.maximum(de_star, 1e-300), np.nan)
+        valid_n = n_star > 1
+        safe_n = np.maximum(n_star, 2)
+        do_star = np.where(valid_n, num_star / safe_n, np.nan)
+
+        if de_fixed is not None:
+            de_star = np.full(n_resamples, de_fixed, dtype=float)
+        else:
+            quad = np.sum((nv_star @ d) * nv_star, axis=1)
+            diag_term = nv_star @ np.diag(d)
+            de_denom = safe_n * (safe_n - 1)
+            de_star = np.where(valid_n, (quad - diag_term) / de_denom, 0.0)
+
+        valid_mask = valid_n & (de_star > 0.0)
+        alpha_star = np.where(valid_mask, 1.0 - do_star / np.maximum(de_star, 1e-300), np.nan)
 
     finite_mask = np.isfinite(alpha_star)
     valid_alphas = alpha_star[finite_mask]
@@ -1865,6 +1947,11 @@ def bootstrap_ci(  # noqa: C901
             d=d,
             de_fixed=de_fixed,
             fallback_pct=(alpha_low_pct, alpha_high_pct),
+            domain=domain,
+            distance_metric=distance_metric,
+            o_units=o_units if is_marginal_dep else None,
+            dtype=dtype_dt,
+            is_marginal_dependent=is_marginal_dep,
         )
 
     q_val = float(np.mean(valid_alphas < alternative_threshold)) if alternative_threshold is not None else None

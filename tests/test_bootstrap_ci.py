@@ -131,6 +131,13 @@ def test_bootstrap_ci_ordinal(ordinal_data: list[list[float]]) -> None:
     assert np.isclose(res.alpha, point)
     assert res.ci_low < res.alpha < res.ci_high
 
+    # Test passing a custom callable metric that is marginal-dependent
+    custom_metric = krippendorff.krippendorff._ordinal_metric
+    res_custom = bootstrap_ci(ordinal_data, level_of_measurement=custom_metric, random_state=42)
+    assert np.isclose(res_custom.alpha, point)
+    assert np.isclose(res_custom.ci_low, res.ci_low)
+    assert np.isclose(res_custom.ci_high, res.ci_high)
+
 
 def test_bootstrap_ci_interval(interval_data: list[list[float]]) -> None:
     res = bootstrap_ci(interval_data, level_of_measurement="interval", random_state=42)
