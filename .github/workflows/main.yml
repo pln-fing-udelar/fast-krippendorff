@@ -45,6 +45,14 @@ jobs:
       - name: Install the project
         run: uv sync --resolution ${{ matrix.resolution-strategy }}
       - name: Test
-        run: uv run pytest --doctest-modules --cov=krippendorff --cov-fail-under=90
+        run: uv run pytest --doctest-modules --cov=krippendorff --cov-fail-under=90 --cov-report=xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: matrix.python-version == '3.11' && matrix.resolution-strategy == 'highest'
+        with:
+          files: ./test-reports/coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
       - name: Run example
         run: uv run python example.py
+
