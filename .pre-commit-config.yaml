@@ -1,0 +1,25 @@
+repos:
+  - repo: local
+    # We ensure all tools come from the environment and use uv.
+    hooks:
+      - id: lint_fix
+        name: lint fix
+        description: "Lint"
+        entry: uv run --frozen ruff check --fix --force-exclude
+        language: system
+        types_or: [ python, pyi, jupyter ]
+        require_serial: true
+      - id: format
+        name: format
+        description: "Format"
+        entry: uv run --frozen ruff format --force-exclude
+        language: system
+        types_or: [ python, pyi, jupyter ]
+        require_serial: true
+      - id: types
+        name: types
+        description: "Check types"
+        entry: uv run --frozen ty check --force-exclude
+        language: system
+        types_or: [ python, pyi, jupyter ]
+        require_serial: true
