@@ -1,4 +1,5 @@
 import sys
+from fractions import Fraction
 
 import numpy as np
 import pytest
@@ -754,3 +755,45 @@ def test_bipolar_object_domain_with_numpy_int64_extremes_no_wraparound() -> None
     dummy_nv = np.ones(v1.shape, dtype=float)
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
     assert np.isclose(dist[0, 1], 1.0)
+
+
+def test_circular_fractional_circumference_oversized_integers() -> None:
+    circ_fn = circular_metric(circumference=4.5)
+    big = 10**400
+    v1 = np.array([big], dtype=object)
+    v2 = np.array([0], dtype=object)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    residue = float(Fraction(big) % Fraction(4.5))
+    shortest = min(residue, 4.5 - residue)
+    assert np.isclose(dist[0], np.sin(np.pi * shortest / 4.5) ** 2)
+
+
+def test_circular_fractional_circumference_large_integer_exact_remainder() -> None:
+    circ_fn = circular_metric(circumference=4.5)
+    v1 = np.array([2**60 + 1], dtype=object)
+    v2 = np.array([0], dtype=object)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    residue = float(Fraction(2**60 + 1) % Fraction(4.5))
+    shortest = min(residue, 4.5 - residue)
+    assert np.isclose(dist[0], np.sin(np.pi * shortest / 4.5) ** 2)
+
+
+def test_circular_fractional_circumference_mixed_domain_oversized_integer() -> None:
+    circ_fn = circular_metric(circumference=4.5)
+    big = 10**400
+    domain = np.array([0.5, 0, big], dtype=object)
+    v1 = domain[:, None]
+    v2 = domain[None, :]
+    dummy_idx = np.zeros(v1.shape, dtype=int)
+    dummy_nv = np.ones(v1.shape, dtype=float)
+    dist = circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv)
+    r_big = float(Fraction(big) % Fraction(4.5))
+    for i, j, a, b in [(1, 2, 0.0, r_big), (0, 2, 0.5, r_big)]:
+        d = (a - b) % 4.5
+        expected = np.sin(np.pi * min(d, 4.5 - d) / 4.5) ** 2
+        assert np.isclose(dist[i, j], expected)
+        assert np.isclose(dist[j, i], expected)

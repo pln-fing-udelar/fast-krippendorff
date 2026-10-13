@@ -10,6 +10,7 @@ The module naming follows the one from the Wikipedia link.
 import math
 import numbers
 from collections.abc import Mapping, Sequence
+from fractions import Fraction
 from typing import Any, Literal, Protocol, TypeVar
 
 import numpy as np
@@ -73,7 +74,7 @@ class DistanceMetric(Protocol):
         """
 
 
-LevelOfMeasurement = Literal["bipolar", "circular", "interval", "nominal", "ordinal", "ratio"] | DistanceMetric
+LevelOfMeasurement = Literal["nominal", "ordinal", "interval", "ratio", "circular", "bipolar"] | DistanceMetric
 
 
 def _nominal_metric(
@@ -281,6 +282,36 @@ def _scale_operand_by_u(arr: Any, u: int, dtype: np.dtype) -> npt.NDArray:
     return out
 
 
+def _circular_residue(x: Any, u: Any) -> float:
+    """Return x mod u in [0, u) as a float, reducing integers exactly before any float conversion."""
+    if isinstance(x, (int, np.integer)):
+        if isinstance(u, (int, np.integer)):
+            return float(int(x) % int(u))
+        return float(Fraction(int(x)) % Fraction(float(u)))
+    return float(x) % float(u)
+
+
+def _circular_scaled_diff_scalar(a: Any, b: Any, u: Any) -> float:
+    """Compute normalized shortest circular difference for a single pair of (possibly mixed-type) values."""
+    huge_u = isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024
+    if isinstance(a, (int, np.integer)) and isinstance(b, (int, np.integer)):
+        diff = int(a) - int(b)
+        if huge_u:
+            u_int = int(u)
+            diff_mod = diff % u_int
+            return _scale_val(min(diff_mod, u_int - diff_mod), u_int)
+        u_f = float(u)
+        r = _circular_residue(diff, u)
+        return min(r, u_f - r) / u_f
+    if huge_u:
+        u_int = int(u)
+        diff_mod = abs(_scale_val(a, u_int) - _scale_val(b, u_int)) % 1.0
+        return min(diff_mod, 1.0 - diff_mod)
+    u_f = float(u)
+    diff_mod = (_circular_residue(a, u) - _circular_residue(b, u)) % u_f
+    return min(diff_mod, u_f - diff_mod) / u_f
+
+
 def _circular_scaled_diff(
     v1: npt.NDArray,
     v2: npt.NDArray,
@@ -296,10 +327,17 @@ def _circular_scaled_diff(
             diff_mod = np.remainder(diff, u_int)
             diff_short = np.where(diff_mod < u_int - diff_mod, diff_mod, u_int - diff_mod)
             return _scale_operand_by_u(diff_short, u_int, real_dtype)
-        u_val = u if isinstance(u, (int, np.integer)) else float(u)
-        diff_mod = np.remainder(diff, u_val)
-        diff_short = np.where(diff_mod < u_val - diff_mod, diff_mod, u_val - diff_mod)
-        return np.asarray(diff_short / u_val, dtype=real_dtype)
+        if isinstance(u, (int, np.integer)):
+            diff_mod = np.remainder(diff, u)
+            diff_short = np.where(diff_mod < u - diff_mod, diff_mod, u - diff_mod)
+            return np.asarray(diff_short / u, dtype=real_dtype)
+        u_f = float(u)
+        diff_arr = np.asarray(diff)
+        out = np.zeros(diff_arr.shape, dtype=real_dtype)
+        for i, d in enumerate(diff_arr.flat):
+            r = _circular_residue(d, u_f)
+            out.flat[i] = min(r, u_f - r) / u_f
+        return out
 
     is_pure_float = np.issubdtype(v1.dtype, np.floating) and np.issubdtype(v2.dtype, np.floating)
     if is_pure_float:
@@ -320,35 +358,7 @@ def _circular_scaled_diff(
     out = np.zeros(out_shape, dtype=real_dtype)
     b_v1, b_v2 = np.broadcast_arrays(v1, v2)
     for idx in np.ndindex(out_shape):
-        a = b_v1[idx]
-        b = b_v2[idx]
-        if isinstance(a, (int, np.integer)) and isinstance(b, (int, np.integer)):
-            diff = int(a) - int(b)
-            if isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024:
-                u_int = int(u)
-                diff_mod = diff % u_int
-                diff_short = min(diff_mod, u_int - diff_mod)
-                out[idx] = _scale_val(diff_short, u_int)
-            else:
-                diff_mod = diff % u
-                diff_short = min(diff_mod, u - diff_mod)
-                out[idx] = diff_short / u
-        else:
-            if isinstance(u, (int, np.integer)) and int(u).bit_length() >= 1024:
-                u_int = int(u)
-                s1 = _scale_val(a, u_int)
-                s2 = _scale_val(b, u_int)
-                diff_mod = abs(s1 - s2) % 1.0
-                out[idx] = min(diff_mod, 1.0 - diff_mod)
-            else:
-                u_f = float(u)
-                u_is_int = isinstance(u, (int, np.integer))
-                a_val = float(int(a) % int(u)) if (isinstance(a, (int, np.integer)) and u_is_int) else float(a)
-                b_val = float(int(b) % int(u)) if (isinstance(b, (int, np.integer)) and u_is_int) else float(b)
-                diff = (a_val % u_f) - (b_val % u_f)
-                diff_mod = diff % u_f
-                diff_short = min(diff_mod, u_f - diff_mod)
-                out[idx] = diff_short / u_f
+        out[idx] = _circular_scaled_diff_scalar(b_v1[idx], b_v2[idx], u)
     return out
 
 
@@ -747,7 +757,7 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
     ----------
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of "bipolar", "circular", "interval", "nominal", "ordinal", "ratio", or a callable.
+        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", or a callable.
 
     Returns
     -------
@@ -755,12 +765,12 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
         Distance callable.
     """
     return {
-        "bipolar": _bipolar_metric,
-        "circular": _circular_metric,
-        "interval": _interval_metric,
         "nominal": _nominal_metric,
         "ordinal": _ordinal_metric,
+        "interval": _interval_metric,
         "ratio": _ratio_metric,
+        "circular": _circular_metric,
+        "bipolar": _bipolar_metric,
     }.get(level_of_measurement, level_of_measurement)  # ty:ignore[invalid-return-type]
 
 
@@ -1006,7 +1016,7 @@ def alpha(  # noqa: C901
 
     level_of_measurement : string or callable
         Steven's level of measurement of the variable.
-        It must be one of "bipolar", "circular", "interval", "nominal", "ordinal", "ratio", or a callable.
+        It must be one of "nominal", "ordinal", "interval", "ratio", "circular", "bipolar", or a callable.
 
     dtype : data-type
         Result and computation data-type.
