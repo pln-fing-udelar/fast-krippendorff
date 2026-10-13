@@ -346,6 +346,36 @@ def test_bootstrap_ci_validation_errors(nominal_data: list[list[float]]) -> None
             all_value_counts=[[1, 1], [1, 1]],
         )
 
+    # Invalid alternative_threshold
+    with pytest.raises(ValueError, match="alternative_threshold must be a finite real number"):
+        bootstrap_ci(nominal_data, alternative_threshold=np.nan)
+
+    with pytest.raises(ValueError, match="alternative_threshold must be a finite real number"):
+        bootstrap_ci(nominal_data, alternative_threshold="invalid")  # ty:ignore[invalid-argument-type]
+
+    with pytest.raises(ValueError, match="alternative_threshold must be a finite real number"):
+        bootstrap_ci(nominal_data, alternative_threshold=float("inf"))
+
+
+def test_bootstrap_ci_bca_fallback_warning() -> None:
+    # 2-unit dataset where BCa falls back to percentile interval
+    data = [
+        [1, 2],
+        [1, 2],
+    ]
+    with pytest.warns(UserWarning, match="BCa bootstrap interval requires at least 3 units"):
+        res = bootstrap_ci(data, method="bca", random_state=42)
+    assert res.ci_low <= res.alpha <= res.ci_high
+
+
+def test_bootstrap_ci_fewer_than_two_valid_replicates_raises() -> None:
+    data = [
+        [1, 1, 1],
+        [1, 1, 2],
+    ]
+    with pytest.raises(ValueError, match="Fewer than 2 valid bootstrap resamples could be estimated"):
+        bootstrap_ci(data, n_resamples=2, random_state=1)
+
 
 def test_bootstrap_ci_degenerate_resamples_warning() -> None:
     # Dataset where some resamples could draw identical values

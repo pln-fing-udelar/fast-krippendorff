@@ -1618,6 +1618,12 @@ def _compute_bca_interval(
     """Compute Bias-Corrected and Accelerated (BCa) bootstrap confidence interval."""
     n_units = len(num_u)
     if n_units < 3 or len(valid_alphas) < 3:
+        warnings.warn(
+            "BCa bootstrap interval requires at least 3 units and 3 valid replicates; "
+            "falling back to percentile interval.",
+            UserWarning,
+            stacklevel=3,
+        )
         return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
 
     prop = float(np.mean(valid_alphas < observed_alpha))
@@ -1671,6 +1677,12 @@ def _compute_bca_interval(
     valid_jack = alpha_jack[np.isfinite(alpha_jack)]
 
     if len(valid_jack) < 2:
+        warnings.warn(
+            "BCa jackknife acceleration could not be computed (fewer than 2 valid jackknife estimates); "
+            "falling back to percentile interval.",
+            UserWarning,
+            stacklevel=3,
+        )
         return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
 
     mean_j = float(np.mean(valid_jack))
@@ -1685,6 +1697,11 @@ def _compute_bca_interval(
     denom_high = 1.0 - a * (z0 + z_high)
 
     if denom_low == 0.0 or denom_high == 0.0:
+        warnings.warn(
+            "BCa acceleration denominator was zero; falling back to percentile interval.",
+            UserWarning,
+            stacklevel=3,
+        )
         return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
 
     p_low = _norm_cdf(z0 + (z0 + z_low) / denom_low)
@@ -1694,6 +1711,11 @@ def _compute_bca_interval(
     p_high = min(max(p_high, 0.0), 1.0)
 
     if p_low >= p_high:
+        warnings.warn(
+            "BCa adjusted quantiles were degenerate; falling back to percentile interval.",
+            UserWarning,
+            stacklevel=3,
+        )
         return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
 
     return float(np.percentile(valid_alphas, 100.0 * p_low)), float(np.percentile(valid_alphas, 100.0 * p_high))
@@ -1801,6 +1823,14 @@ def bootstrap_ci(  # noqa: C901
 
     if method not in ("percentile", "bca", "basic", "normal"):
         raise ValueError(f"Invalid method {method!r}. Expected one of 'percentile', 'bca', 'basic', 'normal'.")
+
+    if alternative_threshold is not None:
+        if not (
+            isinstance(alternative_threshold, (int, float, np.floating))
+            and np.isfinite(alternative_threshold)
+            and not isinstance(alternative_threshold, bool)
+        ):
+            raise ValueError("alternative_threshold must be a finite real number.")
 
     dtype_dt = np.dtype(dtype)
     if np.issubdtype(dtype_dt, np.complexfloating):
@@ -1926,8 +1956,11 @@ def bootstrap_ci(  # noqa: C901
     finite_mask = np.isfinite(alpha_star)
     valid_alphas = alpha_star[finite_mask]
     n_invalid = n_resamples - len(valid_alphas)
-    if len(valid_alphas) == 0:
-        raise ValueError("All bootstrap resamples had zero expected disagreement or were undefined.")
+    if len(valid_alphas) < 2:
+        raise ValueError(
+            "Fewer than 2 valid bootstrap resamples could be estimated "
+            "(resamples had zero expected disagreement or fewer than 2 pairable ratings)."
+        )
     if n_invalid > 0:
         warnings.warn(
             f"{n_invalid} of {n_resamples} bootstrap resamples had zero expected disagreement "
@@ -1936,7 +1969,7 @@ def bootstrap_ci(  # noqa: C901
             stacklevel=2,
         )
 
-    se = float(np.std(valid_alphas, ddof=1)) if len(valid_alphas) > 1 else 0.0
+    se = float(np.std(valid_alphas, ddof=1))
 
     alpha_low_pct = 100.0 * (1.0 - confidence_level) / 2.0
     alpha_high_pct = 100.0 * (1.0 - (1.0 - confidence_level) / 2.0)
