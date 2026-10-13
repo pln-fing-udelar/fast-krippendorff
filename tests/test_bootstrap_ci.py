@@ -138,6 +138,11 @@ def test_bootstrap_ci_ordinal(ordinal_data: list[list[float]]) -> None:
     assert np.isclose(res_custom.ci_low, res.ci_low)
     assert np.isclose(res_custom.ci_high, res.ci_high)
 
+    # Test BCa method with ordinal metric
+    res_bca = bootstrap_ci(ordinal_data, level_of_measurement="ordinal", method="bca", random_state=42)
+    assert np.isclose(res_bca.alpha, point)
+    assert res_bca.ci_low < res_bca.alpha < res_bca.ci_high
+
 
 def test_bootstrap_ci_interval(interval_data: list[list[float]]) -> None:
     res = bootstrap_ci(interval_data, level_of_measurement="interval", random_state=42)

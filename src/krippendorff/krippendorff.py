@@ -1663,7 +1663,8 @@ def _compute_bca_interval(
     fallback_pct: tuple[float, float],
     domain: npt.NDArray | None = None,
     distance_metric: DistanceMetric | None = None,
-    o_units: npt.NDArray | None = None,
+    counts: npt.NDArray | None = None,
+    weights: npt.NDArray | None = None,
     dtype: np.dtype = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
     is_marginal_dependent: bool = False,
 ) -> tuple[float, float]:
@@ -1690,8 +1691,11 @@ def _compute_bca_interval(
     safe_nj = np.maximum(n_j, 2)
 
     if is_marginal_dependent:
-        assert o_units is not None and domain is not None and distance_metric is not None
-        o_total = np.sum(o_units, axis=0)
+        assert counts is not None and weights is not None and domain is not None and distance_metric is not None
+        v_len = counts.shape[1]
+        diag_idx = np.arange(v_len)
+        o_total = counts.T @ weights
+        o_total[diag_idx, diag_idx] -= weights.sum(axis=0)
         total_nv = np.sum(nv_matrix, axis=0)
         alpha_jack = np.empty(n_units, dtype=float)
         for u in range(n_units):
@@ -1700,7 +1704,11 @@ def _compute_bca_interval(
                 alpha_jack[u] = np.nan
                 continue
             nv_u = total_nv - nv_matrix[u]
-            ou = o_total - o_units[u]
+            cu = counts[u]
+            wu = weights[u]
+            ou_unit = np.outer(cu, wu)
+            ou_unit[diag_idx, diag_idx] -= wu
+            ou = o_total - ou_unit
             eu = _random_coincidences(nv_u, dtype=dtype)
             du = _distances(domain, distance_metric, nv_u, dtype=dtype)
             deu = (eu * du).sum() / nu
@@ -1949,14 +1957,7 @@ def bootstrap_ci(  # noqa: C901
     per_resample = n_units + (v_domain_len * v_domain_len if is_marginal_dep else v_domain_len)
     batch_size = min(n_resamples, max(1, 1_000_000 // max(per_resample, 1)))
 
-    o_units: npt.NDArray | None = None
-    if is_marginal_dep:
-        counts_3d = counts[:, :, np.newaxis]
-        weights_3d = weights[:, np.newaxis, :]
-        o_units = counts_3d * weights_3d
-        diag_idx = np.arange(v_domain_len)
-        o_units[:, diag_idx, diag_idx] = (counts - 1) * weights
-        o_units = np.where(valid_units[:, np.newaxis, np.newaxis], o_units, 0.0)
+    diag_idx = np.arange(v_domain_len) if is_marginal_dep else None
 
     alpha_star = np.empty(n_resamples, dtype=float)
     for start in range(0, n_resamples, batch_size):
@@ -1965,18 +1966,24 @@ def bootstrap_ci(  # noqa: C901
         w_batch = rng.multinomial(n_units, p_units, size=b_count)
 
         if is_marginal_dep:
-            assert o_units is not None
-            o_star = np.tensordot(w_batch, o_units, axes=(1, 0))
-            nv_star = o_star.sum(axis=-1)
-            n_star = nv_star.sum(axis=-1)
-
+            assert diag_idx is not None
             for i in range(b_count):
-                nb = n_star[i]
+                w_i = w_batch[i]
+                nz = np.flatnonzero(w_i)
+                w_nz = w_i[nz]
+                c_nz = counts[nz]
+                wgt_nz = weights[nz]
+
+                nb = float(np.sum(w_nz * den_u[nz]))
                 if nb <= 1:
                     alpha_star[start + i] = np.nan
                     continue
-                nv_b = nv_star[i]
-                o_b = o_star[i]
+
+                c_w = w_nz[:, np.newaxis] * c_nz
+                o_b = c_w.T @ wgt_nz
+                o_b[diag_idx, diag_idx] -= w_nz @ wgt_nz
+
+                nv_b = np.sum(o_b, axis=1)
                 e_b = _random_coincidences(nv_b, dtype=dtype_dt)
                 d_b = _distances(domain, distance_metric, nv_b, dtype=dtype_dt)
                 deb = (e_b * d_b).sum() / nb
@@ -2050,7 +2057,8 @@ def bootstrap_ci(  # noqa: C901
             fallback_pct=(alpha_low_pct, alpha_high_pct),
             domain=domain,
             distance_metric=distance_metric,
-            o_units=o_units,
+            counts=counts,
+            weights=weights,
             dtype=dtype_dt,
             is_marginal_dependent=is_marginal_dep,
         )
