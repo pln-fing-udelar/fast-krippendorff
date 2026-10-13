@@ -8,7 +8,7 @@
 
 Fast computation of [Krippendorff's alpha](https://en.wikipedia.org/wiki/Krippendorff%27s_alpha) agreement measure.
 
-Based on [Thomas Grill implementation](https://github.com/grrrr/krippendorff-alpha).
+Originally based on [Thomas Grill's implementation](https://github.com/grrrr/krippendorff-alpha).
 
 ## Installation
 
@@ -32,7 +32,7 @@ Pandas is commonly used to load annotations from CSV or database exports. Becaus
 
 #### 1. Wide format (Units as rows, Coders as columns)
 
-When each row represents an annotated item and each column is an annotator (with missing annotations represented by `NaN` or `None`):
+When each row represents an annotated item, and each column is an annotator (with missing annotations represented by `NaN` or `None`):
 
 ```python
 import pandas as pd
@@ -74,7 +74,7 @@ See `example.py` and `alpha`'s docstring for additional examples and options.
 
 ## Caveats
 
-The implementation is fast as it doesn't do a nested loop for the coders. However, `V` should be small, since a `VxV` matrix it's used.
+The implementation is fast because it doesn't use nested loops over the coders. However, `V` should be small, since it uses a `VxV` matrix.
 
 ## Citing
 
