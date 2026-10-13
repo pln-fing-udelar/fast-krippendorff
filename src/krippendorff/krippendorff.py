@@ -166,23 +166,27 @@ def _is_all_pure_integer(arr: npt.NDArray) -> bool:
     return False
 
 
+def _is_integral_scalar(x: Any) -> bool:
+    """Check if scalar x represents an exact integer without precision loss."""
+    if isinstance(x, bool):
+        return False
+    if isinstance(x, (int, np.integer)):
+        return True
+    if isinstance(x, (float, np.floating)):
+        return bool(np.isfinite(x) and x.is_integer())
+    if isinstance(x, numbers.Real):
+        try:
+            return bool(int(x) == x)
+        except (OverflowError, ValueError):
+            return False
+    return False
+
+
 def _is_all_integer(arr: npt.NDArray) -> bool:
     """Check if all elements of an array represent integer values."""
     if _is_all_pure_integer(arr):
         return True
-    for x in arr.flat:
-        if isinstance(x, bool):
-            return False
-        if isinstance(x, (int, np.integer)):
-            continue
-        if isinstance(x, (numbers.Real, np.floating)) and np.isfinite(x):
-            try:
-                if float(x).is_integer():
-                    continue
-            except (OverflowError, ValueError):
-                pass
-        return False
-    return True
+    return all(_is_integral_scalar(x) for x in arr.flat)
 
 
 def _to_pure_integer_if_all_integral(arr: npt.NDArray) -> npt.NDArray:
@@ -190,17 +194,7 @@ def _to_pure_integer_if_all_integral(arr: npt.NDArray) -> npt.NDArray:
     if np.issubdtype(arr.dtype, np.integer):
         return arr
     if arr.dtype == object:
-        for x in arr.flat:
-            if isinstance(x, bool):
-                return arr
-            if isinstance(x, (int, np.integer)):
-                continue
-            if isinstance(x, (numbers.Real, np.floating)) and np.isfinite(x):
-                try:
-                    if float(x).is_integer():
-                        continue
-                except (OverflowError, ValueError):
-                    pass
+        if not all(_is_integral_scalar(x) for x in arr.flat):
             return arr
         normalized = np.empty(arr.shape, dtype=object)
         for i, x in enumerate(arr.flat):
@@ -219,9 +213,7 @@ def _to_object_int(x: Any) -> Any:
 
 def _to_int_if_integral(x: Any) -> Any:
     """Convert an integral scalar to Python int if it represents an integer value."""
-    if isinstance(x, (int, np.integer)):
-        return int(x)
-    if isinstance(x, (float, np.floating)) and np.isfinite(x) and x.is_integer():
+    if _is_integral_scalar(x):
         return int(x)
     return x
 

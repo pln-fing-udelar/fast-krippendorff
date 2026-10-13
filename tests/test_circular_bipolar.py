@@ -906,3 +906,15 @@ def test_bipolar_longdouble_endpoint_precision() -> None:
     dummy_nv = np.array([1.0])
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv, dtype=np.dtype(np.longdouble))
     assert np.isclose(dist[0], 1.0 / 9.0)
+
+
+def test_circular_longdouble_fractional_requires_explicit_circumference() -> None:
+    if np.finfo(np.longdouble).nmant <= 53:
+        pytest.skip("np.longdouble has standard float64 precision on this platform")
+    circ_fn = circular_metric()
+    v1 = np.array([np.longdouble(2) ** 60 + np.longdouble(0.5)], dtype=np.longdouble)
+    v2 = np.array([np.longdouble(2) ** 60], dtype=np.longdouble)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    with pytest.raises(ValueError, match="An explicit circumference must be provided"):
+        circ_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv, dtype=np.dtype(np.longdouble))
