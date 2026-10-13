@@ -83,7 +83,9 @@ class BootstrapResult(NamedTuple):
         Bootstrap standard error of alpha (sample standard deviation of bootstrap replicates).
     q_value : float or None
         Krippendorff's q-value: empirical probability that the true reliability falls below
-        `alternative_threshold` ($q = P(\\alpha^* < \\alpha_{\\text{min}})$).
+        `alternative_threshold` ($q = P(\alpha^* < \alpha_{\text{min}})$). When degenerate resamples
+        occur (omitted with a warning), $q$ is estimated conditionally over all valid resamples:
+        $P(\alpha^* < \alpha_{\text{min}} \\mid \alpha^* \text{ is defined})$.
         None if `alternative_threshold` was not provided.
     resamples : ndarray or None
         Array of bootstrap estimates of shape `(n_resamples,)` if `return_distribution` is True,
@@ -1743,9 +1745,11 @@ def bootstrap_ci(  # noqa: C901
     n_resamples : int, default 2000
         Number of bootstrap resamples to draw.
     alternative_threshold : float, optional
-        Acceptable reliability benchmark $\\alpha_{\\text{min}}$ (e.g. 0.800 or 0.667).
+        Acceptable reliability benchmark $\alpha_{\text{min}}$ (e.g. 0.800 or 0.667).
         When specified, calculates Krippendorff's $q$-value: the empirical probability
-        $q = P(\\alpha^* < \\alpha_{\\text{min}})$ that true reliability fails to reach the threshold.
+        $q = P(\alpha^* < \alpha_{\text{min}})$ that true reliability fails to reach the threshold.
+        When degenerate resamples occur (omitted with a warning), $q$ is estimated conditionally
+        over all valid resamples: $P(\alpha^* < \alpha_{\text{min}} \\mid \alpha^* \text{ is defined})$.
     method : {"percentile", "bca", "basic", "normal"}, default "percentile"
         Bootstrap confidence interval method:
         - "percentile": Empirical percentiles of bootstrap distribution (standard in Krippendorff literature).
@@ -1792,8 +1796,8 @@ def bootstrap_ci(  # noqa: C901
     if not (isinstance(confidence_level, (int, float, np.floating)) and 0.0 < confidence_level < 1.0):
         raise ValueError("confidence_level must be between 0 and 1.")
 
-    if not (isinstance(n_resamples, (int, np.integer)) and n_resamples >= 1):
-        raise ValueError("n_resamples must be an integer >= 1.")
+    if not (isinstance(n_resamples, (int, np.integer)) and n_resamples >= 2):
+        raise ValueError("n_resamples must be an integer >= 2.")
 
     if method not in ("percentile", "bca", "basic", "normal"):
         raise ValueError(f"Invalid method {method!r}. Expected one of 'percentile', 'bca', 'basic', 'normal'.")
@@ -1860,7 +1864,8 @@ def bootstrap_ci(  # noqa: C901
     num_u = np.sum(counts * wd, axis=1) - np.sum(weights * np.diag(d), axis=1)
 
     rng = _get_rng(random_state)
-    w_samples = rng.multinomial(n_units, [1.0 / n_units] * n_units, size=n_resamples)
+    p_units = [1.0 / n_units] * n_units
+    batch_size = min(n_resamples, max(50, 1_000_000 // max(n_units, 1)))
 
     o_units: npt.NDArray | None = None
     if is_marginal_dep:
@@ -1871,45 +1876,52 @@ def bootstrap_ci(  # noqa: C901
         o_units[:, diag_idx, diag_idx] = (counts - 1) * weights
         o_units = np.where(valid_units[:, np.newaxis, np.newaxis], o_units, 0.0)
 
-        o_star = np.tensordot(w_samples, o_units, axes=(1, 0))
-        nv_star = o_star.sum(axis=-1)
-        n_star = nv_star.sum(axis=-1)
+    alpha_star = np.empty(n_resamples, dtype=float)
+    for start in range(0, n_resamples, batch_size):
+        end = min(start + batch_size, n_resamples)
+        b_count = end - start
+        w_batch = rng.multinomial(n_units, p_units, size=b_count)
 
-        alpha_star = np.empty(n_resamples, dtype=float)
-        for b in range(n_resamples):
-            nb = n_star[b]
-            if nb <= 1:
-                alpha_star[b] = np.nan
-                continue
-            nv_b = nv_star[b]
-            o_b = o_star[b]
-            e_b = _random_coincidences(nv_b, dtype=dtype_dt)
-            d_b = _distances(domain, distance_metric, nv_b, dtype=dtype_dt)
-            deb = (e_b * d_b).sum() / nb
-            if deb == 0.0:
-                alpha_star[b] = np.nan
-                continue
-            dob = (o_b * d_b).sum() / nb
-            alpha_star[b] = 1.0 - dob / deb
-    else:
-        num_star = w_samples @ num_u
-        n_star = w_samples @ den_u
-        nv_star = w_samples @ nv_matrix
+        if is_marginal_dep:
+            assert o_units is not None
+            o_star = np.tensordot(w_batch, o_units, axes=(1, 0))
+            nv_star = o_star.sum(axis=-1)
+            n_star = nv_star.sum(axis=-1)
 
-        valid_n = n_star > 1
-        safe_n = np.maximum(n_star, 2)
-        do_star = np.where(valid_n, num_star / safe_n, np.nan)
-
-        if de_fixed is not None:
-            de_star = np.full(n_resamples, de_fixed, dtype=float)
+            for i in range(b_count):
+                nb = n_star[i]
+                if nb <= 1:
+                    alpha_star[start + i] = np.nan
+                    continue
+                nv_b = nv_star[i]
+                o_b = o_star[i]
+                e_b = _random_coincidences(nv_b, dtype=dtype_dt)
+                d_b = _distances(domain, distance_metric, nv_b, dtype=dtype_dt)
+                deb = (e_b * d_b).sum() / nb
+                if deb == 0.0:
+                    alpha_star[start + i] = np.nan
+                    continue
+                dob = (o_b * d_b).sum() / nb
+                alpha_star[start + i] = 1.0 - dob / deb
         else:
-            quad = np.sum((nv_star @ d) * nv_star, axis=1)
-            diag_term = nv_star @ np.diag(d)
-            de_denom = safe_n * (safe_n - 1)
-            de_star = np.where(valid_n, (quad - diag_term) / de_denom, 0.0)
+            num_star = w_batch @ num_u
+            n_star = w_batch @ den_u
+            nv_star = w_batch @ nv_matrix
 
-        valid_mask = valid_n & (de_star > 0.0)
-        alpha_star = np.where(valid_mask, 1.0 - do_star / np.maximum(de_star, 1e-300), np.nan)
+            valid_n = n_star > 1
+            safe_n = np.maximum(n_star, 2)
+            do_star = np.where(valid_n, num_star / safe_n, np.nan)
+
+            if de_fixed is not None:
+                de_star = np.full(b_count, de_fixed, dtype=float)
+            else:
+                quad = np.sum((nv_star @ d) * nv_star, axis=1)
+                diag_term = nv_star @ np.diag(d)
+                de_denom = safe_n * (safe_n - 1)
+                de_star = np.where(valid_n, (quad - diag_term) / de_denom, 0.0)
+
+            valid_mask = valid_n & (de_star > 0.0)
+            alpha_star[start:end] = np.where(valid_mask, 1.0 - do_star / np.maximum(de_star, 1e-300), np.nan)
 
     finite_mask = np.isfinite(alpha_star)
     valid_alphas = alpha_star[finite_mask]

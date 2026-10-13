@@ -325,7 +325,9 @@ def test_bootstrap_ci_validation_errors(nominal_data: list[list[float]]) -> None
         bootstrap_ci(nominal_data, confidence_level=-0.1)
 
     # Invalid n_resamples
-    with pytest.raises(ValueError, match="n_resamples must be an integer >= 1"):
+    with pytest.raises(ValueError, match="n_resamples must be an integer >= 2"):
+        bootstrap_ci(nominal_data, n_resamples=1)
+    with pytest.raises(ValueError, match="n_resamples must be an integer >= 2"):
         bootstrap_ci(nominal_data, n_resamples=0)
 
     # Invalid method
