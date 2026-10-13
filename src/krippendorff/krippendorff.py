@@ -11,7 +11,7 @@ import math
 import numbers
 from collections.abc import Mapping, Sequence
 from fractions import Fraction
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, Protocol, TypeVar, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -20,7 +20,9 @@ DEFAULT_DTYPE = np.float64
 
 __all__ = [
     "DEFAULT_DTYPE",
+    "AlphaResult",
     "DistanceMetric",
+    "KrippendorffResult",
     "LevelOfMeasurement",
     "MetricResultScalarType",
     "ValueScalarType",
@@ -29,6 +31,40 @@ __all__ = [
     "circular_metric",
     "polar_metric",
 ]
+
+
+ResultScalarType = TypeVar("ResultScalarType", bound=float | complex | np.inexact)
+
+
+class AlphaResult(NamedTuple, Generic[ResultScalarType]):
+    """Result of Krippendorff's alpha calculation when agreement components are requested.
+
+    Attributes
+    ----------
+    alpha : float, complex, or np.inexact
+        Krippendorff's alpha agreement measure.
+    d_o : float, complex, or np.inexact
+        Observed disagreement ($D_o$).
+    d_e : float, complex, or np.inexact
+        Expected disagreement ($D_e$) under chance agreement.
+    """
+
+    alpha: ResultScalarType
+    d_o: ResultScalarType
+    d_e: ResultScalarType
+
+    @property
+    def do(self) -> ResultScalarType:
+        """Alias for `d_o` (observed disagreement)."""
+        return self.d_o
+
+    @property
+    def de(self) -> ResultScalarType:
+        """Alias for `d_e` (expected disagreement)."""
+        return self.d_e
+
+
+KrippendorffResult = AlphaResult
 
 
 ValueScalarType = TypeVar("ValueScalarType", bound=np.generic)
@@ -1055,6 +1091,66 @@ def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
     raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
 
+@overload
+def alpha(
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    value_counts: npt.ArrayLike | None = ...,
+    value_domain: npt.ArrayLike | None = ...,
+    level_of_measurement: LevelOfMeasurement = ...,
+    dtype: type[float] | np.dtype[np.floating] = ...,
+    *,
+    all_reliability_data: npt.ArrayLike | None = ...,
+    all_value_counts: npt.ArrayLike | None = ...,
+    random_coincidences: npt.ArrayLike | None = ...,
+    return_components: Literal[False] = ...,
+) -> float: ...
+
+
+@overload
+def alpha(
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    value_counts: npt.ArrayLike | None = ...,
+    value_domain: npt.ArrayLike | None = ...,
+    level_of_measurement: LevelOfMeasurement = ...,
+    dtype: npt.DTypeLike = ...,
+    *,
+    all_reliability_data: npt.ArrayLike | None = ...,
+    all_value_counts: npt.ArrayLike | None = ...,
+    random_coincidences: npt.ArrayLike | None = ...,
+    return_components: Literal[False] = ...,
+) -> float | complex | np.inexact: ...
+
+
+@overload
+def alpha(
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    value_counts: npt.ArrayLike | None = ...,
+    value_domain: npt.ArrayLike | None = ...,
+    level_of_measurement: LevelOfMeasurement = ...,
+    dtype: npt.DTypeLike = ...,
+    *,
+    all_reliability_data: npt.ArrayLike | None = ...,
+    all_value_counts: npt.ArrayLike | None = ...,
+    random_coincidences: npt.ArrayLike | None = ...,
+    return_components: Literal[True],
+) -> AlphaResult[Any]: ...
+
+
+@overload
+def alpha(
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    value_counts: npt.ArrayLike | None = ...,
+    value_domain: npt.ArrayLike | None = ...,
+    level_of_measurement: LevelOfMeasurement = ...,
+    dtype: npt.DTypeLike = ...,
+    *,
+    all_reliability_data: npt.ArrayLike | None = ...,
+    all_value_counts: npt.ArrayLike | None = ...,
+    random_coincidences: npt.ArrayLike | None = ...,
+    return_components: bool,
+) -> float | complex | np.inexact | AlphaResult[Any]: ...
+
+
 def alpha(  # noqa: C901
     reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
     value_counts: npt.ArrayLike | None = None,
@@ -1065,7 +1161,8 @@ def alpha(  # noqa: C901
     all_reliability_data: npt.ArrayLike | None = None,
     all_value_counts: npt.ArrayLike | None = None,
     random_coincidences: npt.ArrayLike | None = None,
-) -> float:
+    return_components: bool = False,
+) -> Any:
     """Compute Krippendorff's alpha.
 
     See https://en.wikipedia.org/wiki/Krippendorff%27s_alpha for more information.
@@ -1120,10 +1217,16 @@ def alpha(  # noqa: C901
         `n_v`, `random_coincidences` should provide unnormalized counts rather than proportions.
         At most one of `all_reliability_data`, `all_value_counts`, or `random_coincidences` can be provided.
 
+    return_components : bool, default=False
+        If True, return an `AlphaResult` named tuple containing `(alpha, d_o, d_e)`
+        (which also provides `.do` and `.de` attributes), where `d_o` is observed disagreement
+        and `d_e` is expected disagreement.
+
     Returns
     -------
-    alpha : ndarray
-        Scalar value of Krippendorff's alpha of type `dtype`.
+    alpha : float, complex, np.inexact, or AlphaResult
+        Scalar value of Krippendorff's alpha of type `dtype`, or an `AlphaResult` named tuple
+        containing `(alpha, d_o, d_e)` if `return_components=True`.
 
     Examples
     --------
@@ -1344,4 +1447,7 @@ def alpha(  # noqa: C901
     de = (e * d).sum() / e.sum()
     if de == 0:
         raise ValueError("Expected disagreement is zero, making Krippendorff's alpha undefined.")
-    return 1 - do / de
+    alpha_val = 1 - do / de
+    if return_components:
+        return AlphaResult(alpha=alpha_val, d_o=do, d_e=de)
+    return alpha_val
