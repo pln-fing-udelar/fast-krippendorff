@@ -7,6 +7,7 @@ from .krippendorff import (
     alpha,
     bipolar_metric,
     circular_metric,
+    polar_metric,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "alpha",
     "bipolar_metric",
     "circular_metric",
+    "polar_metric",
 ]

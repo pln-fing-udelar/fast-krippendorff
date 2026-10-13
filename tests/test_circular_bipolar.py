@@ -4,7 +4,7 @@ from fractions import Fraction
 import numpy as np
 import pytest
 
-from krippendorff import alpha, bipolar_metric, circular_metric
+from krippendorff import alpha, bipolar_metric, circular_metric, polar_metric
 
 
 def test_circular_metric_exact_hand_calculation() -> None:
@@ -863,3 +863,19 @@ def test_bipolar_large_lower_bound_float_comparison() -> None:
 
     with pytest.raises(ValueError, match="out-of-bounds"):
         bip_fn_neg(np.array([-1e307]), np.array([-1e308]), dummy_idx, dummy_idx, dummy_nv)
+
+
+def test_polar_metric_alias_for_bipolar() -> None:
+    assert polar_metric is bipolar_metric
+
+    data = [
+        [-1, 0, 1, 2],
+        [-2, 0, 1, 1],
+    ]
+    alpha_bipolar = alpha(data, level_of_measurement="bipolar")
+    alpha_polar = alpha(data, level_of_measurement="polar")
+    assert alpha_polar == alpha_bipolar
+
+    alpha_bipolar_fn = alpha(data, level_of_measurement=bipolar_metric(low=-2, high=2))
+    alpha_polar_fn = alpha(data, level_of_measurement=polar_metric(low=-2, high=2))
+    assert alpha_polar_fn == alpha_bipolar_fn

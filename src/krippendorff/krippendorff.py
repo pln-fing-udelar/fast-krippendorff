@@ -27,6 +27,7 @@ __all__ = [
     "alpha",
     "bipolar_metric",
     "circular_metric",
+    "polar_metric",
 ]
 
 
@@ -74,7 +75,7 @@ class DistanceMetric(Protocol):
         """
 
 
-LevelOfMeasurement = Literal["nominal", "ordinal", "interval", "ratio", "circular", "bipolar"] | DistanceMetric
+LevelOfMeasurement = Literal["nominal", "ordinal", "interval", "ratio", "circular", "bipolar", "polar"] | DistanceMetric
 
 
 def _nominal_metric(
@@ -742,6 +743,7 @@ def bipolar_metric(
 
 _circular_metric = circular_metric()
 _bipolar_metric = bipolar_metric()
+polar_metric = bipolar_metric
 
 
 def _coincidences(
@@ -855,6 +857,7 @@ def _distance_metric(level_of_measurement: LevelOfMeasurement) -> DistanceMetric
         "ratio": _ratio_metric,
         "circular": _circular_metric,
         "bipolar": _bipolar_metric,
+        "polar": _bipolar_metric,
     }.get(level_of_measurement, level_of_measurement)  # ty:ignore[invalid-return-type]
 
 
@@ -1015,7 +1018,7 @@ def _domain_from_raw_values(
     domain_set = set(domain_arr)
     if any(v not in domain_set for v in unique_vals):
         raise ValueError("The reliability data contains out-of-domain values.")
-    if level_of_measurement in ("interval", "ratio", "circular", "bipolar") and (
+    if level_of_measurement in ("interval", "ratio", "circular", "bipolar", "polar") and (
         np.iscomplexobj(domain_arr) or any(isinstance(v, (complex, np.complexfloating)) for v in domain_arr)
     ):
         raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
@@ -1279,7 +1282,7 @@ def alpha(  # noqa: C901
     if not np.issubdtype(dtype, np.inexact):
         raise ValueError("`dtype` must be an inexact type.")
 
-    if level_of_measurement in ("interval", "ratio", "circular", "bipolar") and (
+    if level_of_measurement in ("interval", "ratio", "circular", "bipolar", "polar") and (
         np.iscomplexobj(value_domain) or any(isinstance(v, (complex, np.complexfloating)) for v in value_domain)
     ):
         raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
