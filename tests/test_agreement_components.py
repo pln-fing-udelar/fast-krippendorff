@@ -1,7 +1,6 @@
 """Tests for return_components parameter in krippendorff.alpha."""
 
 import numpy as np
-import pytest
 
 import krippendorff
 from krippendorff import AlphaResult, KrippendorffResult
@@ -115,15 +114,17 @@ def test_return_components_circular_and_bipolar() -> None:
 
 def test_return_components_with_value_counts() -> None:
     """Verify return_components when providing value_counts instead of reliability_data."""
-    value_counts = np.array([
-        [1, 0, 0, 0],
-        [0, 2, 0, 0],
-        [2, 0, 0, 0],
-        [0, 0, 2, 0],
-        [0, 0, 2, 1],
-        [0, 0, 0, 3],
-        [1, 0, 1, 0],
-    ])
+    value_counts = np.array(
+        [
+            [1, 0, 0, 0],
+            [0, 2, 0, 0],
+            [2, 0, 0, 0],
+            [0, 0, 2, 0],
+            [0, 0, 2, 1],
+            [0, 0, 0, 3],
+            [1, 0, 1, 0],
+        ]
+    )
     single_alpha = krippendorff.alpha(value_counts=value_counts, level_of_measurement="nominal")
     res = krippendorff.alpha(value_counts=value_counts, level_of_measurement="nominal", return_components=True)
 
