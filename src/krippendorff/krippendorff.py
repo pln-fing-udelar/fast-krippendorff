@@ -211,6 +211,12 @@ def _ratio_metric(
     )
 
 
+setattr(_nominal_metric, "marginal_dependent", False)  # noqa: B010
+setattr(_ordinal_metric, "marginal_dependent", True)  # noqa: B010
+setattr(_interval_metric, "marginal_dependent", False)  # noqa: B010
+setattr(_ratio_metric, "marginal_dependent", False)  # noqa: B010
+
+
 def _has_complex(arr: npt.NDArray) -> bool:
     """Check if an array has complex dtype or contains complex elements in object dtype."""
     return np.iscomplexobj(arr) or any(isinstance(x, (complex, np.complexfloating)) for x in arr.flat)
@@ -500,6 +506,7 @@ def circular_metric(
         diff_scaled = _circular_scaled_diff(v1, v2, u, real_dtype)
         return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
+    setattr(_metric, "marginal_dependent", False)  # noqa: B010
     return _metric
 
 
@@ -807,6 +814,7 @@ def bipolar_metric(
         ratio1, ratio2 = _bipolar_terms(v1, v2, v_min, v_max, calc_dtype)
         return (ratio1 * ratio2).astype(dtype)
 
+    setattr(_metric, "marginal_dependent", False)  # noqa: B010
     return _metric
 
 
@@ -1578,22 +1586,15 @@ def _get_rng(random_state: int | np.random.Generator | np.random.RandomState | N
     raise ValueError(f"Invalid random_state: {random_state!r}. Expected int, Generator, RandomState, or None.")
 
 
-def _is_metric_marginal_dependent(
-    metric_spec: LevelOfMeasurement,
-    domain: npt.NDArray,
-    n_v: npt.NDArray,
-    dtype: np.dtype,
-) -> bool:
+def _is_metric_marginal_dependent(metric_spec: LevelOfMeasurement) -> bool:
     """Check whether the distance metric depends on marginal counts n_v."""
-    if metric_spec == "ordinal":
-        return True
     if isinstance(metric_spec, str):
+        return metric_spec == "ordinal"
+    # If the callable explicitly declares independence, honor it
+    if getattr(metric_spec, "marginal_dependent", None) is False:
         return False
-    # Custom DistanceMetric callable: probe with n_v and n_v + 1
-    metric = _distance_metric(metric_spec)
-    d1 = _distances(domain, metric, n_v, dtype=dtype)
-    d2 = _distances(domain, metric, n_v + 1, dtype=dtype)
-    return not np.allclose(d1, d2)
+    # Treat custom callables as marginal-dependent by default because n_v is in the metric protocol
+    return True
 
 
 def _compute_bca_interval(
@@ -1731,7 +1732,10 @@ def bootstrap_ci(  # noqa: C901
         Possible values the units can take. If None, it is inferred from data.
     level_of_measurement : string or callable, default "nominal"
         Metric for difference measurement. One of "nominal", "ordinal", "interval", "ratio", "circular",
-        "bipolar", "polar", or a custom DistanceMetric callable.
+        "bipolar", "polar", or a custom DistanceMetric callable. For custom callable metrics, distances
+        are recomputed per bootstrap resample by default (since DistanceMetric accepts marginal counts n_v).
+        If a custom metric does not depend on marginals, setting `metric.marginal_dependent = False` enables
+        the faster vectorized bootstrap path.
     dtype : data-type, default np.float64
         Computation data type (must be an inexact, non-complex float type).
     confidence_level : float, default 0.95
@@ -1842,9 +1846,7 @@ def bootstrap_ci(  # noqa: C901
     )
     d = _distances(domain, distance_metric, dist_n_v, dtype=dtype_dt)
 
-    is_marginal_dep = de_fixed is None and _is_metric_marginal_dependent(
-        level_of_measurement, domain, dist_n_v, dtype_dt
-    )
+    is_marginal_dep = de_fixed is None and _is_metric_marginal_dependent(level_of_measurement)
 
     n_units, v_domain_len = counts.shape
     pairable = counts.sum(axis=1)
@@ -1857,17 +1859,18 @@ def bootstrap_ci(  # noqa: C901
     wd = weights @ d.T
     num_u = np.sum(counts * wd, axis=1) - np.sum(weights * np.diag(d), axis=1)
 
-    counts_3d = counts[:, :, np.newaxis]
-    weights_3d = weights[:, np.newaxis, :]
-    o_units = counts_3d * weights_3d
-    diag_idx = np.arange(v_domain_len)
-    o_units[:, diag_idx, diag_idx] = (counts - 1) * weights
-    o_units = np.where(valid_units[:, np.newaxis, np.newaxis], o_units, 0.0)
-
     rng = _get_rng(random_state)
     w_samples = rng.multinomial(n_units, [1.0 / n_units] * n_units, size=n_resamples)
 
+    o_units: npt.NDArray | None = None
     if is_marginal_dep:
+        counts_3d = counts[:, :, np.newaxis]
+        weights_3d = weights[:, np.newaxis, :]
+        o_units = counts_3d * weights_3d
+        diag_idx = np.arange(v_domain_len)
+        o_units[:, diag_idx, diag_idx] = (counts - 1) * weights
+        o_units = np.where(valid_units[:, np.newaxis, np.newaxis], o_units, 0.0)
+
         o_star = np.tensordot(w_samples, o_units, axes=(1, 0))
         nv_star = o_star.sum(axis=-1)
         n_star = nv_star.sum(axis=-1)
@@ -1949,7 +1952,7 @@ def bootstrap_ci(  # noqa: C901
             fallback_pct=(alpha_low_pct, alpha_high_pct),
             domain=domain,
             distance_metric=distance_metric,
-            o_units=o_units if is_marginal_dep else None,
+            o_units=o_units,
             dtype=dtype_dt,
             is_marginal_dependent=is_marginal_dep,
         )

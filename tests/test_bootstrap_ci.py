@@ -182,6 +182,30 @@ def test_bootstrap_ci_bipolar() -> None:
     assert np.isclose(res_custom.alpha, point)
 
 
+def test_bootstrap_ci_custom_callable_metric(interval_data: list[list[float]]) -> None:
+    # 1. Custom callable without attribute: treated as marginal-dependent by default
+    def custom_diff(
+        v1: np.ndarray,
+        v2: np.ndarray,
+        i1: np.ndarray,
+        i2: np.ndarray,
+        n_v: np.ndarray,
+        dtype: object = np.float64,
+    ) -> np.ndarray:
+        return (v1 - v2) ** 2
+
+    res_default = bootstrap_ci(interval_data, level_of_measurement=custom_diff, random_state=42)
+    point = alpha(interval_data, level_of_measurement=custom_diff)
+    assert np.isclose(res_default.alpha, point)
+
+    # 2. Custom callable declaring marginal_dependent = False: uses independent tensor path
+    setattr(custom_diff, "marginal_dependent", False)  # noqa: B010
+    res_indep = bootstrap_ci(interval_data, level_of_measurement=custom_diff, random_state=42)
+    assert np.isclose(res_indep.alpha, point)
+    assert np.isclose(res_default.ci_low, res_indep.ci_low)
+    assert np.isclose(res_default.ci_high, res_indep.ci_high)
+
+
 def test_bootstrap_ci_value_counts() -> None:
     value_counts = np.array(
         [
