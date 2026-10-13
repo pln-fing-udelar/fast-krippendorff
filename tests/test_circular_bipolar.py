@@ -882,6 +882,8 @@ def test_polar_metric_alias_for_bipolar() -> None:
 
 
 def test_bipolar_integer_scale_longdouble_precision() -> None:
+    if np.finfo(np.longdouble).maxexp <= 1024:
+        pytest.skip("np.longdouble has standard float64 range on this platform")
     high = 10**400
     bip_fn = bipolar_metric(low=0, high=high)
     v1 = np.array([0])
@@ -890,3 +892,17 @@ def test_bipolar_integer_scale_longdouble_precision() -> None:
     dummy_nv = np.array([1.0])
     dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv, dtype=np.dtype(np.longdouble))
     assert dist[0] > 0.0
+
+
+def test_bipolar_longdouble_endpoint_precision() -> None:
+    if np.finfo(np.longdouble).nmant <= 53:
+        pytest.skip("np.longdouble has standard float64 precision on this platform")
+    low = np.longdouble(2) ** 60
+    high = low + np.longdouble(1.5)
+    bip_fn = bipolar_metric(low=low, high=high)
+    v1 = np.array([low + np.longdouble(0.5)], dtype=np.longdouble)
+    v2 = np.array([low + np.longdouble(1.0)], dtype=np.longdouble)
+    dummy_idx = np.array([0])
+    dummy_nv = np.array([1.0])
+    dist = bip_fn(v1, v2, dummy_idx, dummy_idx, dummy_nv, dtype=np.dtype(np.longdouble))
+    assert np.isclose(dist[0], 1.0 / 9.0)

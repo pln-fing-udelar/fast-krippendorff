@@ -147,7 +147,12 @@ def _is_finite_array(arr: npt.NDArray) -> bool:
     for x in arr.flat:
         if isinstance(x, (int, np.integer)):
             continue
-        if not isinstance(x, (numbers.Real, np.floating)) or not math.isfinite(x):
+        if not isinstance(x, (numbers.Real, np.floating)):
+            return False
+        if isinstance(x, np.floating):
+            if not np.isfinite(x):
+                return False
+        elif not math.isfinite(x):
             return False
     return True
 
@@ -365,7 +370,7 @@ def _circular_scaled_diff(
     return out
 
 
-def _normalize_circumference(circumference: float | None) -> Any:
+def _normalize_circumference(circumference: float | np.floating | None) -> Any:
     """Validate and normalize circumference parameter."""
     if circumference is None:
         return None
@@ -383,7 +388,7 @@ def _normalize_circumference(circumference: float | None) -> Any:
 
 
 def circular_metric(
-    circumference: float | None = None,
+    circumference: float | np.floating | None = None,
 ) -> DistanceMetric:
     """Distance metric factory for circular data.
 
@@ -430,7 +435,7 @@ def circular_metric(
     return _metric
 
 
-def _frexp_val(val: Any) -> tuple[float, int]:
+def _frexp_val(val: Any) -> tuple[Any, int]:
     """Return (mantissa, exponent) such that val == mantissa * 2**exponent."""
     if isinstance(val, (int, np.integer)):
         val_int = int(val)
@@ -438,11 +443,12 @@ def _frexp_val(val: Any) -> tuple[float, int]:
             return 0.0, 0
         bits = val_int.bit_length()
         if bits >= 1024:
-            shift = bits - 53
-            m = float(abs(val_int) >> shift)
+            shift = max(0, bits - 113)
+            chunk = abs(val_int) >> shift
+            ld = np.longdouble(chunk)
             if val_int < 0:
-                m = -m
-            return math.ldexp(m, -53), bits
+                ld = -ld
+            return np.ldexp(ld, -(bits - shift)), bits
     if isinstance(val, Fraction):
         if val == 0:
             return 0.0, 0
@@ -452,8 +458,14 @@ def _frexp_val(val: Any) -> tuple[float, int]:
         den_m, den_e = _frexp_val(abs_val.denominator)
         m = (num_m / den_m) * sign
         e = num_e - den_e
-        norm_m, norm_e = math.frexp(m)
-        return norm_m, e + norm_e
+        if isinstance(m, np.floating):
+            norm_m, norm_e = np.frexp(m)
+        else:
+            norm_m, norm_e = math.frexp(float(m))
+        return norm_m, e + int(norm_e)
+    if isinstance(val, np.floating):
+        m, e = np.frexp(val)
+        return m, int(e)
     val_f = float(val)
     return math.frexp(val_f)
 
@@ -462,7 +474,7 @@ def _scale_val_by_exp(val: Any, exp: int, dtype: npt.DTypeLike = DEFAULT_DTYPE) 
     """Scale a scalar val by 2**(-exp)."""
     m, e = _frexp_val(val)
     dtype_obj = np.dtype(dtype)
-    if np.issubdtype(dtype_obj, np.floating) and dtype_obj.itemsize > 8:
+    if np.issubdtype(dtype_obj, np.floating):
         return np.ldexp(dtype_obj.type(m), e - exp)
     return math.ldexp(m, e - exp)
 
@@ -482,8 +494,12 @@ def _max_exp_arr(arr: npt.NDArray) -> int:
     """Compute maximum binary exponent across array elements."""
     arr_np = np.asarray(arr)
     if np.issubdtype(arr_np.dtype, np.floating):
-        max_v = float(np.max(np.abs(arr_np)))
-        return math.frexp(max_v)[1] if max_v > 0 else 0
+        if arr_np.size == 0:
+            return 0
+        max_v = np.max(np.abs(arr_np))
+        if max_v > 0:
+            return int(np.frexp(max_v)[1])
+        return 0
     return max((_frexp_val(x)[1] for x in arr_np.flat), default=0)
 
 
@@ -564,13 +580,19 @@ def _bipolar_terms(
         exp1 = max(min_exp, max_v_exp)
         v1_1 = _scale_bipolar_array(v1, exp1, calc_dt)
         v2_1 = _scale_bipolar_array(v2, exp1, calc_dt)
-        min_1 = math.ldexp(min_m, min_exp - exp1)
+        if np.issubdtype(calc_dt, np.floating):
+            min_1 = np.ldexp(calc_dt.type(min_m), min_exp - exp1)
+        else:
+            min_1 = math.ldexp(min_m, min_exp - exp1)
         term1_f = (v1_1 - min_1) + (v2_1 - min_1)
 
         exp2 = max(max_exp, max_v_exp)
         v1_2 = _scale_bipolar_array(v1, exp2, calc_dt)
         v2_2 = _scale_bipolar_array(v2, exp2, calc_dt)
-        max_2 = math.ldexp(max_m, max_exp - exp2)
+        if np.issubdtype(calc_dt, np.floating):
+            max_2 = np.ldexp(calc_dt.type(max_m), max_exp - exp2)
+        else:
+            max_2 = math.ldexp(max_m, max_exp - exp2)
         term2_f = (max_2 - v1_2) + (max_2 - v2_2)
 
         diff_1 = v1_1 - v2_1
@@ -623,20 +645,22 @@ def _normalize_endpoint(val: Any, name: str) -> Any:
 
 def _scalar_less_than(x: Any, b: Any) -> bool:
     """Compare scalar x < b preserving arbitrary-precision integer comparisons."""
-    if isinstance(x, (int, np.integer)):
-        return int(x) < b
-    if isinstance(x, (float, np.floating)):
-        return float(x) < b
-    return bool(x < b)
+    if isinstance(x, (int, np.integer)) and isinstance(b, (int, np.integer)):
+        return int(x) < int(b)
+    try:
+        return bool(x < b)
+    except (OverflowError, TypeError):
+        return bool(float(x) < b)
 
 
 def _scalar_greater_than(x: Any, b: Any) -> bool:
     """Compare scalar x > b preserving arbitrary-precision integer comparisons."""
-    if isinstance(x, (int, np.integer)):
-        return int(x) > b
-    if isinstance(x, (float, np.floating)):
-        return float(x) > b
-    return bool(x > b)
+    if isinstance(x, (int, np.integer)) and isinstance(b, (int, np.integer)):
+        return int(x) > int(b)
+    try:
+        return bool(x > b)
+    except (OverflowError, TypeError):
+        return bool(float(x) > b)
 
 
 def _val_less_than(arr: npt.NDArray, bound: Any) -> bool:
@@ -660,8 +684,8 @@ def _val_greater_than(arr: npt.NDArray, bound: Any) -> bool:
 
 
 def bipolar_metric(
-    low: float | None = None,
-    high: float | None = None,
+    low: float | np.floating | None = None,
+    high: float | np.floating | None = None,
 ) -> DistanceMetric:
     """Distance metric factory for bipolar data.
 
