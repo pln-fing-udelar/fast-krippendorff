@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 import pytest
 
@@ -103,14 +105,59 @@ def test_bootstrap_ci_alternative_threshold_q_value(interval_data: list[list[flo
 
 
 @pytest.mark.parametrize("method", ["percentile", "bca", "basic", "normal"])
-def test_bootstrap_ci_methods(nominal_data: list[list[float]], method: str) -> None:
-    res = bootstrap_ci(nominal_data, level_of_measurement="nominal", method=method, random_state=42)  # ty:ignore[invalid-argument-type]
+def test_bootstrap_ci_methods(
+    nominal_data: list[list[float]], method: Literal["percentile", "bca", "basic", "normal"]
+) -> None:
+    confidence_level = 0.95
+    res = bootstrap_ci(
+        nominal_data,
+        level_of_measurement="nominal",
+        method=method,
+        confidence_level=confidence_level,
+        random_state=42,
+        return_distribution=True,
+    )
     low, high = res.confidence_interval
     assert low < high
     assert np.isfinite(low) and np.isfinite(high)
-    if method in ("percentile", "bca"):
+    assert res.resamples is not None
+
+    alpha_low_pct = 100.0 * (1.0 - confidence_level) / 2.0
+    alpha_high_pct = 100.0 - alpha_low_pct
+
+    if method == "percentile":
+        expected_low = float(np.percentile(res.resamples, alpha_low_pct))
+        expected_high = float(np.percentile(res.resamples, alpha_high_pct))
+        assert np.isclose(low, expected_low)
+        assert np.isclose(high, expected_high)
         assert -1.0 <= low <= 1.0
         assert -1.0 <= high <= 1.0
+    elif method == "basic":
+        expected_low = float(2.0 * res.alpha - np.percentile(res.resamples, alpha_high_pct))
+        expected_high = float(2.0 * res.alpha - np.percentile(res.resamples, alpha_low_pct))
+        assert np.isclose(low, expected_low)
+        assert np.isclose(high, expected_high)
+    elif method == "normal":
+        from krippendorff.krippendorff import _norm_ppf
+
+        z = -_norm_ppf((1.0 - confidence_level) / 2.0)
+        expected_low = float(res.alpha - z * res.standard_error)
+        expected_high = float(res.alpha + z * res.standard_error)
+        assert np.isclose(low, expected_low)
+        assert np.isclose(high, expected_high)
+    elif method == "bca":
+        assert -1.0 <= low <= 1.0
+        assert -1.0 <= high <= 1.0
+        assert np.isclose(low, 0.2960557308776609)
+        assert np.isclose(high, 1.0)
+        res_pct = bootstrap_ci(
+            nominal_data,
+            level_of_measurement="nominal",
+            method="percentile",
+            confidence_level=confidence_level,
+            random_state=42,
+        )
+        assert not np.isclose(low, res_pct.ci_low)
 
 
 def test_bootstrap_ci_confidence_level_widths(nominal_data: list[list[float]]) -> None:
@@ -275,21 +322,41 @@ def test_bootstrap_ci_dict_data() -> None:
 
 def test_bootstrap_ci_subsample(nominal_data: list[list[float]]) -> None:
     subsample = [row[:8] for row in nominal_data]
+    sub_arr = np.array(subsample)
+    n_units = sub_arr.shape[1]
+    n_resamples = 5
 
     # With all_reliability_data
     res_rel = bootstrap_ci(
-        subsample,
+        sub_arr,
         level_of_measurement="nominal",
         all_reliability_data=nominal_data,
+        n_resamples=n_resamples,
         random_state=42,
+        return_distribution=True,
     )
     point_rel = alpha(
-        subsample,
+        sub_arr,
         level_of_measurement="nominal",
         all_reliability_data=nominal_data,
     )
     assert np.isclose(res_rel.alpha, point_rel)
     assert res_rel.ci_low < res_rel.ci_high
+    assert res_rel.resamples is not None
+
+    # Verify bootstrap resampling reproduced with all_reliability_data fixed reference
+    rng = np.random.default_rng(42)
+    w_draws = rng.multinomial(n_units, [1.0 / n_units] * n_units, size=n_resamples)
+
+    for b in range(n_resamples):
+        resampled_cols = np.repeat(np.arange(n_units), w_draws[b])
+        resampled_data = sub_arr[:, resampled_cols]
+        expected_alpha = alpha(
+            resampled_data,
+            level_of_measurement="nominal",
+            all_reliability_data=nominal_data,
+        )
+        assert np.isclose(res_rel.resamples[b], expected_alpha)
 
     # With all_value_counts
     all_counts = np.array(
@@ -389,6 +456,22 @@ def test_bootstrap_ci_validation_errors(nominal_data: list[list[float]]) -> None
     with pytest.raises(ValueError, match="alternative_threshold must be a finite real number"):
         bootstrap_ci(nominal_data, alternative_threshold=float("inf"))
 
+    # Invalid random_state
+    with pytest.raises(ValueError, match="Invalid random_state"):
+        bootstrap_ci(nominal_data, random_state="invalid")  # ty:ignore[invalid-argument-type]
+
+    # Complex value_domain with real level_of_measurement
+    with pytest.raises(ValueError, match="does not support complex values"):
+        bootstrap_ci(value_counts=[[2, 0], [0, 2]], value_domain=[1j, 2j], level_of_measurement="interval")
+
+    # norm_ppf boundary checks
+    from krippendorff.krippendorff import _norm_ppf
+
+    with pytest.raises(ValueError, match="p must be in"):
+        _norm_ppf(0.0)
+    with pytest.raises(ValueError, match="p must be in"):
+        _norm_ppf(1.0)
+
 
 def test_bootstrap_ci_bca_fallback_warning() -> None:
     # 2-unit dataset where BCa falls back to percentile interval
@@ -486,6 +569,97 @@ def test_bootstrap_ci_large_domain_budgeting() -> None:
     )
     assert np.isfinite(res_chunked.alpha)
     assert res_chunked.ci_low <= res_chunked.ci_high
+
+
+def test_bootstrap_ci_bca_subsample(nominal_data: list[list[float]]) -> None:
+    subsample = [row[:8] for row in nominal_data]
+    res = bootstrap_ci(
+        subsample,
+        all_reliability_data=nominal_data,
+        level_of_measurement="nominal",
+        method="bca",
+        random_state=42,
+    )
+    assert res.ci_low <= res.alpha <= res.ci_high
+
+
+def test_bootstrap_ci_ordinal_degenerate_resamples() -> None:
+    data = [
+        [1, 1, 1],
+        [1, 1, 2],
+    ]
+    with pytest.warns(UserWarning, match="resamples had zero expected disagreement"):
+        res = bootstrap_ci(data, level_of_measurement="ordinal", n_resamples=500, random_state=42)
+    assert np.isfinite(res.standard_error)
+
+
+def test_bootstrap_ci_ordinal_drop_unit_nu_le_1() -> None:
+    data = [
+        [1, 1, np.nan],
+        [2, np.nan, 2],
+    ]
+    with pytest.warns(UserWarning):
+        res = bootstrap_ci(data, level_of_measurement="ordinal", method="bca", random_state=42)
+    assert res.ci_low <= res.alpha <= res.ci_high
+
+
+def test_bootstrap_ci_bca_degenerate_quantiles_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    import krippendorff.krippendorff as km
+
+    data = [[1, 2, 3], [1, 2, 3]]
+    monkeypatch.setattr(km, "_norm_cdf", lambda x: 0.1 if x > 0 else 0.9)
+    with pytest.warns(UserWarning, match="BCa adjusted quantiles were degenerate"):
+        res = bootstrap_ci(data, method="bca", random_state=42)
+    assert res.ci_low <= res.alpha <= res.ci_high
+
+
+def test_bootstrap_ci_random_state_none(nominal_data: list[list[float]]) -> None:
+    res = bootstrap_ci(nominal_data, n_resamples=10, random_state=None)
+    assert np.isfinite(res.alpha)
+    assert res.ci_low <= res.ci_high
+
+
+def test_norm_ppf_pdf_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    import krippendorff.krippendorff as km
+
+    monkeypatch.setattr(km.math, "exp", lambda _: 0.0)
+    x = km._norm_ppf(0.5)
+    assert np.isclose(x, 0.0)
+
+
+def test_bootstrap_ci_ordinal_jackknife_zero_deu() -> None:
+    data = [
+        [1, 1, 1, 1],
+        [2, 1, 1, 1],
+    ]
+    with pytest.warns(UserWarning, match="BCa jackknife acceleration could not be computed"):
+        res = bootstrap_ci(data, level_of_measurement="ordinal", method="bca", random_state=42)
+    assert res.ci_low <= res.alpha <= res.ci_high
+
+
+def test_bootstrap_ci_bca_zero_denominator_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    import krippendorff.krippendorff as km
+
+    orig_ppf = km._norm_ppf
+
+    def mock_ppf(p: float) -> float:
+        frame = sys._getframe(1)
+        if "a" in frame.f_locals and frame.f_code.co_name == "_compute_bca_interval":
+            a = frame.f_locals["a"]
+            z0 = frame.f_locals["z0"]
+            if a != 0:
+                return 1.0 / a - z0
+            return 0.0
+        return orig_ppf(p)
+
+    monkeypatch.setattr(km, "_norm_ppf", mock_ppf)
+
+    data = [[1, 2, 3], [1, 2, 3], [1, 2, 4]]
+    with pytest.warns(UserWarning, match="BCa acceleration denominator was zero"):
+        res = bootstrap_ci(data, method="bca", random_state=42)
+    assert res.ci_low <= res.alpha <= res.ci_high
 
 
 def test_package_exports() -> None:
