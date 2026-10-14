@@ -229,11 +229,19 @@ def test_error_unsupported_dtype_kind() -> None:
 def test_package_exports() -> None:
     for name in [
         "DEFAULT_DTYPE",
+        "AlphaResult",
+        "BootstrapResult",
+        "CodersAxis",
         "DistanceMetric",
+        "KrippendorffResult",
         "LevelOfMeasurement",
         "MetricResultScalarType",
         "ValueScalarType",
         "alpha",
+        "alpha_table",
+        "bootstrap_ci",
+        "bootstrap_ci_table",
+        "table_to_value_counts",
     ]:
         assert hasattr(krippendorff, name)
 

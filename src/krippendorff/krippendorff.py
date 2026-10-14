@@ -23,16 +23,20 @@ __all__ = [
     "DEFAULT_DTYPE",
     "AlphaResult",
     "BootstrapResult",
+    "CodersAxis",
     "DistanceMetric",
     "KrippendorffResult",
     "LevelOfMeasurement",
     "MetricResultScalarType",
     "ValueScalarType",
     "alpha",
+    "alpha_table",
     "bipolar_metric",
     "bootstrap_ci",
+    "bootstrap_ci_table",
     "circular_metric",
     "polar_metric",
+    "table_to_value_counts",
 ]
 
 
@@ -154,6 +158,7 @@ class DistanceMetric(Protocol):
 
 
 LevelOfMeasurement = Literal["nominal", "ordinal", "interval", "ratio", "circular", "bipolar", "polar"] | DistanceMetric
+CodersAxis = Literal[0, 1, "rows", "columns", "row", "col", "cols"]
 
 
 def _nominal_metric(
@@ -966,7 +971,15 @@ def _reliability_data_to_value_counts(
 
 def _is_dict_reliability_data(data: Any) -> bool:
     """Check if the data is structured as dictionary/mapping annotations."""
+    if hasattr(data, "columns") or hasattr(data, "to_numpy"):
+        return False
     if isinstance(data, Mapping):
+        if len(data) > 0 and all(
+            (isinstance(v, (list, tuple, np.ndarray)) or (hasattr(v, "__iter__") and not isinstance(v, (str, bytes))))
+            and not isinstance(v, Mapping)
+            for v in data.values()
+        ):
+            return False
         return True
     if (
         isinstance(data, Sequence)
@@ -982,11 +995,66 @@ def _is_missing(val: Any) -> bool:
     """Check if a value represents a missing annotation."""
     if val is None:
         return True
+    if type(val).__name__ in ("NAType", "NA", "NaTType", "MockNA"):
+        return True
     if isinstance(val, (float, np.floating)) and np.isnan(val):
         return True
     if isinstance(val, (complex, np.complexfloating)) and (np.isnan(val.real) or np.isnan(val.imag)):
         return True
     return False
+
+
+def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:
+    """Convert array-like, tensor, or dataframe to a numpy ndarray without forcing framework imports."""
+    if hasattr(data, "detach") and callable(data.detach):
+        data = data.detach()
+    if hasattr(data, "cpu") and callable(data.cpu):
+        data = data.cpu()
+    if hasattr(data, "to_numpy") and callable(data.to_numpy):
+        data = data.to_numpy()
+    elif hasattr(data, "numpy") and callable(data.numpy):
+        data = data.numpy()
+    elif hasattr(data, "__array__") or hasattr(data, "__array_interface__"):
+        data = np.asarray(data)
+    elif hasattr(data, "values") and not callable(data.values):
+        data = np.asarray(data.values)
+    elif (
+        isinstance(data, Mapping)
+        and len(data) > 0
+        and all(isinstance(v, (list, tuple, np.ndarray)) or hasattr(v, "__iter__") for v in data.values())
+    ):
+        data = np.asarray(list(data.values()))
+    else:
+        data = np.asarray(data)
+    return np.asarray(data, dtype=dtype) if dtype is not None else np.asarray(data)
+
+
+def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:
+    """Normalize object ndarray by replacing missing sentinels with NaN and downcasting numeric arrays."""
+    if arr.dtype != object:
+        return arr
+    out = np.empty(arr.shape, dtype=object)
+    for idx, val in np.ndenumerate(arr):
+        if _is_missing(val):
+            out[idx] = np.nan
+        else:
+            out[idx] = val
+    non_nan = [v for v in out.flat if not (isinstance(v, float) and np.isnan(v))]
+    if len(non_nan) > 0:
+        if all(_is_numeric_scalar(v) for v in non_nan):
+            try:
+                return out.astype(float)
+            except Exception:
+                pass
+        elif all(isinstance(v, str) for v in non_nan):
+            str_out = np.empty(arr.shape, dtype=object)
+            for idx, val in np.ndenumerate(out):
+                str_out[idx] = "nan" if (isinstance(val, float) and np.isnan(val)) else str(val)
+            try:
+                return str_out.astype(str)
+            except Exception:
+                pass
+    return out
 
 
 def _is_numeric_scalar(val: Any) -> bool:
@@ -1065,7 +1133,7 @@ def _domain_from_raw_values(
     level_of_measurement: LevelOfMeasurement,
 ) -> npt.NDArray:
     """Compute and validate the value domain from extracted mapping values."""
-    unique_vals = list(distinct_values)
+    unique_vals = list(dict.fromkeys(distinct_values))
     try:
         unique_vals = sorted(unique_vals)
     except TypeError:
@@ -1141,19 +1209,120 @@ def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
     raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
 
+def _extract_table_columns(
+    table: Any, coder_col: Any, unit_col: Any, value_col: Any
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Extract coder, unit, and value columns from tabular data."""
+    if hasattr(table, "__getitem__") and not isinstance(table, (list, tuple)):
+        try:
+            return list(table[coder_col]), list(table[unit_col]), list(table[value_col])
+        except (KeyError, TypeError, IndexError):
+            pass
+    return (
+        [row[coder_col] for row in table],
+        [row[unit_col] for row in table],
+        [row[value_col] for row in table],
+    )
+
+
+def table_to_value_counts(  # noqa: C901
+    table: Any,
+    coder_col: Any,
+    unit_col: Any,
+    value_col: Any,
+    value_domain: npt.ArrayLike | None = None,
+) -> tuple[npt.NDArray[np.int_], npt.NDArray]:
+    """Convert a long/tidy tabular dataset into a (value_counts, value_domain) pair.
+
+    Parameters
+    ----------
+    table : DataFrame, mapping of columns, or sequence of records
+        Tabular reliability data where each row/record represents a single rating assigned
+        by a coder to a unit.
+    coder_col : hashable
+        Name or index of the column containing coder identifiers.
+    unit_col : hashable
+        Name or index of the column containing unit identifiers.
+    value_col : hashable
+        Name or index of the column containing assigned values/ratings.
+    value_domain : array_like, optional
+        Explicit domain of possible values. If not provided, it is inferred from unique
+        non-missing values observed in `value_col`.
+
+    Returns
+    -------
+    value_counts : ndarray, shape (N, V)
+        Number of coders that assigned each value in `value_domain` to each unit.
+    value_domain : ndarray, shape (V,)
+        The ordered domain of values corresponding to the columns of `value_counts`.
+    """
+    c_list, u_list, v_list = _extract_table_columns(table, coder_col, unit_col, value_col)
+
+    if not (len(c_list) == len(u_list) == len(v_list)):
+        raise ValueError("Columns coder_col, unit_col, and value_col must all have the same length.")
+    if len(c_list) == 0:
+        raise ValueError("The provided table is empty.")
+
+    seen_pairs: dict[tuple[Any, Any], Any] = {}
+    valid_c: list[Any] = []
+    valid_u: list[Any] = []
+    valid_v: list[Any] = []
+    for c, u, v in zip(c_list, u_list, v_list, strict=True):
+        if _is_missing(c) or _is_missing(u) or _is_missing(v):
+            continue
+        pair = (c, u)
+        if pair in seen_pairs:
+            raise ValueError(f"Coder {c!r} has duplicate ratings for unit {u!r}.")
+        seen_pairs[pair] = v
+        valid_c.append(c)
+        valid_u.append(u)
+        valid_v.append(v)
+
+    if len(valid_u) == 0:
+        raise ValueError("No valid non-missing ratings found in the table.")
+
+    unit_map: dict[Any, int] = {}
+    unit_indices: list[int] = []
+    for u in valid_u:
+        if u not in unit_map:
+            unit_map[u] = len(unit_map)
+        unit_indices.append(unit_map[u])
+
+    if value_domain is not None:
+        domain_arr = _to_domain_array(value_domain)
+        val_map = {val: i for i, val in enumerate(domain_arr)}
+        for v in valid_v:
+            if v not in val_map:
+                raise ValueError("The reliability data contains out-of-domain values.")
+        val_indices = np.array([val_map[v] for v in valid_v], dtype=int)
+    else:
+        distinct_v = list(dict.fromkeys(valid_v))
+        domain_arr = _domain_from_raw_values(distinct_v, value_domain=None, level_of_measurement="nominal")
+        val_map = {val: i for i, val in enumerate(domain_arr)}
+        val_indices = np.array([val_map[v] for v in valid_v], dtype=int)
+
+    unit_arr = np.array(unit_indices, dtype=np.int_)
+    val_arr = np.array(val_indices, dtype=np.int_)
+    value_counts = np.zeros((len(unit_map), len(domain_arr)), dtype=np.int_)
+    np.add.at(value_counts, (unit_arr, val_arr), 1)
+
+    return value_counts, domain_arr
+
+
 def _prepare_data_and_domain(  # noqa: C901
-    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None,
-    value_counts: npt.ArrayLike | None,
-    value_domain: npt.ArrayLike | None,
-    level_of_measurement: LevelOfMeasurement,
-    all_reliability_data: npt.ArrayLike | None,
-    all_value_counts: npt.ArrayLike | None,
-    random_coincidences: npt.ArrayLike | None,
+    reliability_data: Any = None,
+    value_counts: npt.ArrayLike | None = None,
+    value_domain: npt.ArrayLike | None = None,
+    level_of_measurement: LevelOfMeasurement = "interval",
+    all_reliability_data: Any = None,
+    all_value_counts: npt.ArrayLike | None = None,
+    random_coincidences: npt.ArrayLike | None = None,
+    coders_axis: CodersAxis = "rows",
+    coder_col: Any = None,
+    unit_col: Any = None,
+    value_col: Any = None,
 ) -> tuple[npt.NDArray[np.int_], npt.NDArray, npt.NDArray | None]:
     """Validate and prepare value_counts and value_domain from raw data inputs."""
-    if (reliability_data is None) == (value_counts is None):
-        raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
-
     subsample_params = [
         all_reliability_data is not None,
         all_value_counts is not None,
@@ -1166,21 +1335,52 @@ def _prepare_data_and_domain(  # noqa: C901
 
     all_rel_arr: npt.NDArray | None = None
     if all_reliability_data is not None:
-        all_rel_arr = np.asarray(all_reliability_data)
+        all_rel_arr = _to_numpy_array(all_reliability_data)
         if all_rel_arr.ndim != 2:
             raise ValueError("The all_reliability_data must be a 2D array.")
+        if coders_axis in (1, "columns", "col", "cols"):
+            all_rel_arr = all_rel_arr.T
+        elif coders_axis not in (0, "rows", "row"):
+            raise ValueError(f"Invalid coders_axis {coders_axis!r}. Expected 0, 1, 'rows', or 'columns'.")
+        all_rel_arr = _clean_object_array(all_rel_arr)
+
+    if coder_col is not None or unit_col is not None or value_col is not None:
+        if not (coder_col is not None and unit_col is not None and value_col is not None):
+            raise ValueError("All three of coder_col, unit_col, and value_col must be specified together.")
+        if reliability_data is None:
+            raise ValueError("A tabular dataset must be provided as reliability_data when specifying column names.")
+        if value_counts is not None:
+            raise ValueError("Cannot provide value_counts when coder_col, unit_col, and value_col are specified.")
+        res_counts, res_domain = table_to_value_counts(
+            reliability_data, coder_col, unit_col, value_col, value_domain=value_domain
+        )
+        if len(res_domain) <= 1:
+            raise ValueError("There has to be more than one value in the domain.")
+        if (res_counts.sum(axis=-1) <= 1).all():
+            raise ValueError("There has to be at least one unit with values assigned by at least two coders.")
+        return res_counts, res_domain, all_rel_arr
+
+    if (reliability_data is None) == (value_counts is None):
+        raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
 
     if reliability_data is not None:
         if _is_dict_reliability_data(reliability_data):
             if all_reliability_data is not None:
                 raise ValueError("Subsample with dict reliability_data is not supported.")
             res_counts, res_domain = _dict_reliability_data_to_value_counts(
-                reliability_data,  # ty:ignore[invalid-argument-type]
+                reliability_data,
                 value_domain,
                 level_of_measurement,
             )
         else:
-            rel_arr = np.asarray(reliability_data)
+            rel_arr = _to_numpy_array(reliability_data)
+            if rel_arr.ndim != 2:
+                raise ValueError("reliability_data must be a 2D array with shape (coders, units).")
+            if coders_axis in (1, "columns", "col", "cols"):
+                rel_arr = rel_arr.T
+            elif coders_axis not in (0, "rows", "row"):
+                raise ValueError(f"Invalid coders_axis {coders_axis!r}. Expected 0, 1, 'rows', or 'columns'.")
+            rel_arr = _clean_object_array(rel_arr)
             computed_value_domain = _domain_from_reliability_data(rel_arr)
 
             if all_reliability_data is not None:
@@ -1193,11 +1393,13 @@ def _prepare_data_and_domain(  # noqa: C901
             if value_domain is None:
                 kind = rel_arr.dtype.kind
                 all_kind = all_rel_arr.dtype.kind if all_rel_arr is not None else None
-                if (kind in {"U", "S"} or all_kind in {"U", "S"}) and level_of_measurement != "nominal":
-                    raise ValueError(
-                        "When using strings, an ordered value_domain is required"
-                        " for level_of_measurement other than 'nominal'."
-                    )
+                if (kind in {"U", "S", "O"} or all_kind in {"U", "S", "O"}) and level_of_measurement != "nominal":
+                    has_str = any(isinstance(v, (str, bytes)) for v in combined_computed_domain)
+                    if has_str:
+                        raise ValueError(
+                            "When using strings, an ordered value_domain is required"
+                            " for level_of_measurement other than 'nominal'."
+                        )
                 res_domain = combined_computed_domain
             else:
                 res_domain = _to_domain_array(value_domain)
@@ -1208,7 +1410,9 @@ def _prepare_data_and_domain(  # noqa: C901
 
             res_counts = _reliability_data_to_value_counts(rel_arr, res_domain)
     else:
-        res_counts = np.asarray(value_counts)
+        res_counts = _to_numpy_array(value_counts)
+        if res_counts.ndim != 2:
+            raise ValueError("The value_counts must be a 2D array.")
 
         if value_domain is None:
             res_domain = np.arange(res_counts.shape[1])
@@ -1250,7 +1454,7 @@ def _compute_expected_coincidences(  # noqa: C901
         e = _random_coincidences(all_n_v, dtype=dtype)
         return e, all_n_v, True
     elif all_value_counts is not None:
-        all_counts = np.asarray(all_value_counts)
+        all_counts = _to_numpy_array(all_value_counts)
         if all_counts.ndim != 2:
             raise ValueError("The all_value_counts must be a 2D array.")
         if all_counts.shape[1] != len(value_domain):
@@ -1274,7 +1478,7 @@ def _compute_expected_coincidences(  # noqa: C901
         e = _random_coincidences(all_n_v, dtype=dtype)
         return e, all_n_v, True
     elif random_coincidences is not None:
-        e = np.asarray(random_coincidences, dtype=dtype)
+        e = _to_numpy_array(random_coincidences, dtype=dtype)
         if e.shape != (len(value_domain), len(value_domain)):
             raise ValueError(
                 f"The random_coincidences shape {e.shape} must be equal to {(len(value_domain), len(value_domain))}."
@@ -1291,13 +1495,17 @@ def _compute_expected_coincidences(  # noqa: C901
 
 @overload
 def alpha(
-    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    reliability_data: Any = ...,
     value_counts: npt.ArrayLike | None = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
     dtype: type[float] | np.dtype[np.floating] = ...,
     *,
-    all_reliability_data: npt.ArrayLike | None = ...,
+    coders_axis: CodersAxis = ...,
+    coder_col: Any = ...,
+    unit_col: Any = ...,
+    value_col: Any = ...,
+    all_reliability_data: Any = ...,
     all_value_counts: npt.ArrayLike | None = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: Literal[False] = ...,
@@ -1306,13 +1514,17 @@ def alpha(
 
 @overload
 def alpha(
-    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    reliability_data: Any = ...,
     value_counts: npt.ArrayLike | None = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
     dtype: npt.DTypeLike = ...,
     *,
-    all_reliability_data: npt.ArrayLike | None = ...,
+    coders_axis: CodersAxis = ...,
+    coder_col: Any = ...,
+    unit_col: Any = ...,
+    value_col: Any = ...,
+    all_reliability_data: Any = ...,
     all_value_counts: npt.ArrayLike | None = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: Literal[False] = ...,
@@ -1321,13 +1533,17 @@ def alpha(
 
 @overload
 def alpha(
-    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    reliability_data: Any = ...,
     value_counts: npt.ArrayLike | None = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
     dtype: npt.DTypeLike = ...,
     *,
-    all_reliability_data: npt.ArrayLike | None = ...,
+    coders_axis: CodersAxis = ...,
+    coder_col: Any = ...,
+    unit_col: Any = ...,
+    value_col: Any = ...,
+    all_reliability_data: Any = ...,
     all_value_counts: npt.ArrayLike | None = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: Literal[True],
@@ -1336,13 +1552,17 @@ def alpha(
 
 @overload
 def alpha(
-    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
+    reliability_data: Any = ...,
     value_counts: npt.ArrayLike | None = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
     dtype: npt.DTypeLike = ...,
     *,
-    all_reliability_data: npt.ArrayLike | None = ...,
+    coders_axis: CodersAxis = ...,
+    coder_col: Any = ...,
+    unit_col: Any = ...,
+    value_col: Any = ...,
+    all_reliability_data: Any = ...,
     all_value_counts: npt.ArrayLike | None = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: bool,
@@ -1350,13 +1570,17 @@ def alpha(
 
 
 def alpha(
-    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
+    reliability_data: Any = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",
     dtype: npt.DTypeLike = DEFAULT_DTYPE,
     *,
-    all_reliability_data: npt.ArrayLike | None = None,
+    coders_axis: CodersAxis = "rows",
+    coder_col: Any = None,
+    unit_col: Any = None,
+    value_col: Any = None,
+    all_reliability_data: Any = None,
     all_value_counts: npt.ArrayLike | None = None,
     random_coincidences: npt.ArrayLike | None = None,
     return_components: bool = False,
@@ -1509,6 +1733,10 @@ def alpha(
         all_reliability_data=all_reliability_data,
         all_value_counts=all_value_counts,
         random_coincidences=random_coincidences,
+        coders_axis=coders_axis,
+        coder_col=coder_col,
+        unit_col=unit_col,
+        value_col=value_col,
     )
 
     dtype = np.dtype(dtype)
@@ -1544,6 +1772,68 @@ def alpha(
     if return_components:
         return AlphaResult(alpha=alpha_val, d_o=do, d_e=de)
     return alpha_val
+
+
+def alpha_table(
+    table: Any,
+    coder_col: Any,
+    unit_col: Any,
+    value_col: Any,
+    level_of_measurement: LevelOfMeasurement = "interval",
+    dtype: npt.DTypeLike = DEFAULT_DTYPE,
+    *,
+    value_domain: npt.ArrayLike | None = None,
+    all_reliability_data: npt.ArrayLike | None = None,
+    all_value_counts: npt.ArrayLike | None = None,
+    random_coincidences: npt.ArrayLike | None = None,
+    return_components: bool = False,
+) -> Any:
+    """Compute Krippendorff's alpha from a long/tidy tabular dataset.
+
+    Parameters
+    ----------
+    table : DataFrame, mapping of columns, or sequence of records
+        Tabular reliability data where each row/record represents a rating assigned
+        by a coder to a unit.
+    coder_col : hashable
+        Name or index of the column containing coder identifiers.
+    unit_col : hashable
+        Name or index of the column containing unit identifiers.
+    value_col : hashable
+        Name or index of the column containing assigned values/ratings.
+    level_of_measurement : string or callable, default "interval"
+        Level of measurement.
+    dtype : data-type, default np.float64
+        Result and computation data-type.
+    value_domain : array_like, optional
+        Explicit domain of possible values.
+    all_reliability_data : array_like, optional
+        Reference reliability data for subsample agreement.
+    all_value_counts : array_like, optional
+        Reference value counts for subsample agreement.
+    random_coincidences : array_like, optional
+        Precomputed random coincidences matrix.
+    return_components : bool, default False
+        Whether to return an `AlphaResult` named tuple `(alpha, d_o, d_e)`.
+
+    Returns
+    -------
+    alpha : float or AlphaResult
+        Krippendorff's alpha point estimate, or `AlphaResult` if `return_components=True`.
+    """
+    vc, dom = table_to_value_counts(
+        table, coder_col=coder_col, unit_col=unit_col, value_col=value_col, value_domain=value_domain
+    )
+    return alpha(
+        value_counts=vc,
+        value_domain=dom,
+        level_of_measurement=level_of_measurement,
+        dtype=dtype,
+        all_reliability_data=all_reliability_data,
+        all_value_counts=all_value_counts,
+        random_coincidences=random_coincidences,
+        return_components=return_components,
+    )
 
 
 def _norm_cdf(x: float) -> float:
@@ -1784,7 +2074,7 @@ def _compute_bca_interval(
 
 
 def bootstrap_ci(  # noqa: C901
-    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
+    reliability_data: Any = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",
@@ -1795,10 +2085,14 @@ def bootstrap_ci(  # noqa: C901
     alternative_threshold: float | None = None,
     method: Literal["percentile", "bca", "basic", "normal"] = "percentile",
     random_state: int | np.random.Generator | np.random.RandomState | None = None,
-    all_reliability_data: npt.ArrayLike | None = None,
+    all_reliability_data: Any = None,
     all_value_counts: npt.ArrayLike | None = None,
     random_coincidences: npt.ArrayLike | None = None,
     return_distribution: bool = False,
+    coders_axis: CodersAxis = "rows",
+    coder_col: Any = None,
+    unit_col: Any = None,
+    value_col: Any = None,
 ) -> BootstrapResult:
     """Compute bootstrap confidence intervals and statistical significance test for Krippendorff's alpha.
 
@@ -1908,6 +2202,10 @@ def bootstrap_ci(  # noqa: C901
         all_reliability_data=all_reliability_data,
         all_value_counts=all_value_counts,
         random_coincidences=random_coincidences,
+        coders_axis=coders_axis,
+        coder_col=coder_col,
+        unit_col=unit_col,
+        value_col=value_col,
     )
 
     if level_of_measurement in ("interval", "ratio", "circular", "bipolar", "polar") and (
@@ -2092,4 +2390,86 @@ def bootstrap_ci(  # noqa: C901
         standard_error=se,
         q_value=q_val,
         resamples=alpha_star if return_distribution else None,
+    )
+
+
+def bootstrap_ci_table(
+    table: Any,
+    coder_col: Any,
+    unit_col: Any,
+    value_col: Any,
+    level_of_measurement: LevelOfMeasurement = "interval",
+    n_resamples: int = 2000,
+    confidence_level: float = 0.95,
+    method: Literal["percentile", "bca", "basic", "normal"] = "percentile",
+    alternative_threshold: float | None = None,
+    all_reliability_data: npt.ArrayLike | None = None,
+    all_value_counts: npt.ArrayLike | None = None,
+    random_state: int | np.random.Generator | np.random.RandomState | None = None,
+    random_coincidences: npt.ArrayLike | None = None,
+    return_distribution: bool = False,
+    dtype: npt.DTypeLike = DEFAULT_DTYPE,
+    *,
+    value_domain: npt.ArrayLike | None = None,
+) -> BootstrapResult:
+    """Compute bootstrap confidence intervals from a long/tidy tabular dataset.
+
+    Parameters
+    ----------
+    table : DataFrame, mapping of columns, or sequence of records
+        Tabular reliability data where each row/record represents a rating assigned
+        by a coder to a unit.
+    coder_col : hashable
+        Name or index of the column containing coder identifiers.
+    unit_col : hashable
+        Name or index of the column containing unit identifiers.
+    value_col : hashable
+        Name or index of the column containing assigned values/ratings.
+    level_of_measurement : string or callable, default "interval"
+        Level of measurement.
+    n_resamples : int, default 2000
+        Number of bootstrap resamples.
+    confidence_level : float, default 0.95
+        Confidence level strictly between 0 and 1.
+    method : {"percentile", "bca", "basic", "normal"}, default "percentile"
+        Bootstrap confidence interval method.
+    alternative_threshold : float, optional
+        Reliability threshold $\\alpha_{\\text{min}}$ for hypothesis testing ($q$-value).
+    all_reliability_data : array_like, optional
+        Reference reliability data for subsample agreement.
+    all_value_counts : array_like, optional
+        Reference value counts for subsample agreement.
+    random_state : int, Generator, RandomState, or None, optional
+        Random seed or generator.
+    random_coincidences : array_like, optional
+        Precomputed random coincidences matrix.
+    return_distribution : bool, default False
+        Whether to return the full bootstrap distribution.
+    dtype : data-type, default np.float64
+        Computation data type.
+    value_domain : array_like, optional
+        Explicit domain of possible values.
+
+    Returns
+    -------
+    result : BootstrapResult
+        Named tuple containing bootstrap results.
+    """
+    vc, dom = table_to_value_counts(
+        table, coder_col=coder_col, unit_col=unit_col, value_col=value_col, value_domain=value_domain
+    )
+    return bootstrap_ci(
+        value_counts=vc,
+        value_domain=dom,
+        level_of_measurement=level_of_measurement,
+        n_resamples=n_resamples,
+        confidence_level=confidence_level,
+        method=method,
+        alternative_threshold=alternative_threshold,
+        all_reliability_data=all_reliability_data,
+        all_value_counts=all_value_counts,
+        random_state=random_state,
+        random_coincidences=random_coincidences,
+        return_distribution=return_distribution,
+        dtype=dtype,
     )
