@@ -53,6 +53,17 @@ def main() -> None:
     )
     print("Krippendorff's alpha for interval metric: ", krippendorff.alpha(value_counts=value_counts))
 
+    print()
+    print("Bootstrap confidence interval (95% CI):")
+    boot_res = krippendorff.bootstrap_ci(
+        value_counts=value_counts,
+        level_of_measurement="nominal",
+        random_state=42,
+    )
+    print(f"  Alpha: {boot_res.alpha:.4f}")
+    print(f"  95% CI: [{boot_res.ci_low:.4f}, {boot_res.ci_high:.4f}]")
+    print(f"  Standard Error: {boot_res.standard_error:.4f}")
+
 
 if __name__ == "__main__":
     main()

@@ -70,7 +70,29 @@ alpha = krippendorff.alpha(reliability_data=matrix, level_of_measurement="interv
 print("Krippendorff's alpha:", alpha)
 ```
 
-See `example.py` and `alpha`'s docstring for additional examples and options.
+### Bootstrap Confidence Intervals and Significance Testing
+
+Compute bootstrap confidence intervals, standard errors, and Krippendorff's $q$-value ($P(\alpha^* < \alpha_{\text{min}})$) with high-speed vectorized resampling:
+
+```python
+import krippendorff
+
+res = krippendorff.bootstrap_ci(
+    reliability_data=matrix,
+    level_of_measurement="interval",
+    confidence_level=0.95,
+    n_resamples=2000,
+    alternative_threshold=0.800,  # Krippendorff q-value against minimum reliability benchmark
+    random_state=42,
+)
+
+print(f"Alpha: {res.alpha:.3f}")
+print(f"95% CI: [{res.ci_low:.3f}, {res.ci_high:.3f}]")
+print(f"Standard Error: {res.standard_error:.4f}")
+print(f"q-value (P(alpha < 0.8)): {res.q_value:.4f}")
+```
+
+See `example.py` and function docstrings for additional examples and options.
 
 ## Caveats
 

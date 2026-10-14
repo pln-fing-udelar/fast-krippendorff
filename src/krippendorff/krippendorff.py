@@ -9,6 +9,7 @@ The module naming follows the one from the Wikipedia link.
 
 import math
 import numbers
+import warnings
 from collections.abc import Mapping, Sequence
 from fractions import Fraction
 from typing import Any, Generic, Literal, NamedTuple, Protocol, TypeVar, overload
@@ -21,6 +22,7 @@ DEFAULT_DTYPE = np.float64
 __all__ = [
     "DEFAULT_DTYPE",
     "AlphaResult",
+    "BootstrapResult",
     "DistanceMetric",
     "KrippendorffResult",
     "LevelOfMeasurement",
@@ -28,6 +30,7 @@ __all__ = [
     "ValueScalarType",
     "alpha",
     "bipolar_metric",
+    "bootstrap_ci",
     "circular_metric",
     "polar_metric",
 ]
@@ -65,6 +68,45 @@ class AlphaResult(NamedTuple, Generic[ResultScalarType]):
 
 
 KrippendorffResult = AlphaResult
+
+
+class BootstrapResult(NamedTuple):
+    """Result of Krippendorff's alpha bootstrap confidence interval calculation.
+
+    Attributes
+    ----------
+    alpha : float
+        Observed point estimate of Krippendorff's alpha on the original sample.
+    confidence_interval : tuple[float, float]
+        Bootstrap confidence interval `(ci_low, ci_high)`.
+    standard_error : float
+        Bootstrap standard error of alpha (sample standard deviation of bootstrap replicates).
+    q_value : float or None
+        Krippendorff's q-value: empirical probability that the true reliability falls below
+        `alternative_threshold` ($q = P(\\alpha^* < \\alpha_{\\text{min}})$). When degenerate resamples
+        occur (omitted with a warning), $q$ is estimated conditionally over all valid resamples:
+        $P(\\alpha^* < \\alpha_{\\text{min}} \\mid \\alpha^* \\text{ is defined})$.
+        None if `alternative_threshold` was not provided.
+    resamples : ndarray or None
+        Array of bootstrap estimates of shape `(n_resamples,)` if `return_distribution` is True,
+        otherwise None.
+    """
+
+    alpha: float
+    confidence_interval: tuple[float, float]
+    standard_error: float
+    q_value: float | None = None
+    resamples: npt.NDArray[np.floating] | None = None
+
+    @property
+    def ci_low(self) -> float:
+        """Alias for lower confidence interval bound."""
+        return self.confidence_interval[0]
+
+    @property
+    def ci_high(self) -> float:
+        """Alias for upper confidence interval bound."""
+        return self.confidence_interval[1]
 
 
 ValueScalarType = TypeVar("ValueScalarType", bound=np.generic)
@@ -169,6 +211,12 @@ def _ratio_metric(
         np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0, dtype=dtype)  # ty:ignore[unsupported-operator]
         ** 2
     )
+
+
+setattr(_nominal_metric, "marginal_dependent", False)  # noqa: B010
+setattr(_ordinal_metric, "marginal_dependent", True)  # noqa: B010
+setattr(_interval_metric, "marginal_dependent", False)  # noqa: B010
+setattr(_ratio_metric, "marginal_dependent", False)  # noqa: B010
 
 
 def _has_complex(arr: npt.NDArray) -> bool:
@@ -460,6 +508,7 @@ def circular_metric(
         diff_scaled = _circular_scaled_diff(v1, v2, u, real_dtype)
         return (np.sin(np.pi * diff_scaled) ** 2).astype(dtype)
 
+    setattr(_metric, "marginal_dependent", False)  # noqa: B010
     return _metric
 
 
@@ -767,6 +816,7 @@ def bipolar_metric(
         ratio1, ratio2 = _bipolar_terms(v1, v2, v_min, v_max, calc_dtype)
         return (ratio1 * ratio2).astype(dtype)
 
+    setattr(_metric, "marginal_dependent", False)  # noqa: B010
     return _metric
 
 
@@ -1091,6 +1141,154 @@ def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
     raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
 
+def _prepare_data_and_domain(  # noqa: C901
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None,
+    value_counts: npt.ArrayLike | None,
+    value_domain: npt.ArrayLike | None,
+    level_of_measurement: LevelOfMeasurement,
+    all_reliability_data: npt.ArrayLike | None,
+    all_value_counts: npt.ArrayLike | None,
+    random_coincidences: npt.ArrayLike | None,
+) -> tuple[npt.NDArray[np.int_], npt.NDArray, npt.NDArray | None]:
+    """Validate and prepare value_counts and value_domain from raw data inputs."""
+    if (reliability_data is None) == (value_counts is None):
+        raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
+
+    subsample_params = [
+        all_reliability_data is not None,
+        all_value_counts is not None,
+        random_coincidences is not None,
+    ]
+    if sum(subsample_params) > 1:
+        raise ValueError(
+            "At most one of all_reliability_data, all_value_counts, or random_coincidences can be provided."
+        )
+
+    all_rel_arr: npt.NDArray | None = None
+    if all_reliability_data is not None:
+        all_rel_arr = np.asarray(all_reliability_data)
+        if all_rel_arr.ndim != 2:
+            raise ValueError("The all_reliability_data must be a 2D array.")
+
+    if reliability_data is not None:
+        if _is_dict_reliability_data(reliability_data):
+            if all_reliability_data is not None:
+                raise ValueError("Subsample with dict reliability_data is not supported.")
+            res_counts, res_domain = _dict_reliability_data_to_value_counts(
+                reliability_data,  # ty:ignore[invalid-argument-type]
+                value_domain,
+                level_of_measurement,
+            )
+        else:
+            rel_arr = np.asarray(reliability_data)
+            computed_value_domain = _domain_from_reliability_data(rel_arr)
+
+            if all_reliability_data is not None:
+                assert all_rel_arr is not None
+                all_computed_domain = _domain_from_reliability_data(all_rel_arr)
+                combined_computed_domain = np.unique(np.concatenate([computed_value_domain, all_computed_domain]))
+            else:
+                combined_computed_domain = computed_value_domain
+
+            if value_domain is None:
+                kind = rel_arr.dtype.kind
+                all_kind = all_rel_arr.dtype.kind if all_rel_arr is not None else None
+                if (kind in {"U", "S"} or all_kind in {"U", "S"}) and level_of_measurement != "nominal":
+                    raise ValueError(
+                        "When using strings, an ordered value_domain is required"
+                        " for level_of_measurement other than 'nominal'."
+                    )
+                res_domain = combined_computed_domain
+            else:
+                res_domain = _to_domain_array(value_domain)
+                if not np.isin(computed_value_domain, res_domain).all():
+                    raise ValueError("The reliability data contains out-of-domain values.")
+                if all_rel_arr is not None and not np.isin(all_computed_domain, res_domain).all():
+                    raise ValueError("The reference reliability data contains out-of-domain values.")
+
+            res_counts = _reliability_data_to_value_counts(rel_arr, res_domain)
+    else:
+        res_counts = np.asarray(value_counts)
+
+        if value_domain is None:
+            res_domain = np.arange(res_counts.shape[1])
+        else:
+            res_domain = _to_domain_array(value_domain)
+
+        if res_counts.shape[1] != len(res_domain):
+            raise ValueError("The value domain should be equal to the number of columns of value_counts.")
+
+    if len(res_domain) <= 1:
+        raise ValueError("There has to be more than one value in the domain.")
+
+    if (res_counts.sum(axis=-1) <= 1).all():
+        raise ValueError("There has to be at least one unit with values assigned by at least two coders.")
+
+    return res_counts, res_domain, all_rel_arr
+
+
+def _compute_expected_coincidences(  # noqa: C901
+    value_domain: npt.NDArray,
+    n_v: npt.NDArray,
+    dtype: np.dtype,
+    all_rel_arr: npt.NDArray | None,
+    all_value_counts: npt.ArrayLike | None,
+    random_coincidences: npt.ArrayLike | None,
+) -> tuple[npt.NDArray, npt.NDArray, bool]:
+    """Compute expected coincidence matrix e, marginal counts for distances dist_n_v, and reference flag."""
+    if all_rel_arr is not None:
+        all_computed_domain = _domain_from_reliability_data(all_rel_arr)
+        if not np.isin(all_computed_domain, value_domain).all():
+            raise ValueError("The reference reliability data contains out-of-domain values.")
+        all_counts = _reliability_data_to_value_counts(all_rel_arr, value_domain)
+        if (all_counts.sum(axis=-1) <= 1).all():
+            raise ValueError(
+                "There has to be at least one unit in all_reliability_data with values assigned by at least two coders."
+            )
+        all_o = _coincidences(all_counts, dtype=dtype)
+        all_n_v = all_o.sum(axis=0)
+        e = _random_coincidences(all_n_v, dtype=dtype)
+        return e, all_n_v, True
+    elif all_value_counts is not None:
+        all_counts = np.asarray(all_value_counts)
+        if all_counts.ndim != 2:
+            raise ValueError("The all_value_counts must be a 2D array.")
+        if all_counts.shape[1] != len(value_domain):
+            raise ValueError("The number of columns of all_value_counts should be equal to the value domain length.")
+        if (
+            (
+                not np.issubdtype(all_counts.dtype, np.integer)
+                and not (np.issubdtype(all_counts.dtype, np.floating) and (all_counts % 1 == 0).all())
+            )
+            or not np.isfinite(all_counts).all()
+            or (all_counts < 0).any()
+        ):
+            raise ValueError("The all_value_counts must contain finite, non-negative integer counts.")
+        all_counts = all_counts.astype(np.int_, copy=False)
+        if (all_counts.sum(axis=-1) <= 1).all():
+            raise ValueError(
+                "There has to be at least one unit in all_value_counts with values assigned by at least two coders."
+            )
+        all_o = _coincidences(all_counts, dtype=dtype)
+        all_n_v = all_o.sum(axis=0)
+        e = _random_coincidences(all_n_v, dtype=dtype)
+        return e, all_n_v, True
+    elif random_coincidences is not None:
+        e = np.asarray(random_coincidences, dtype=dtype)
+        if e.shape != (len(value_domain), len(value_domain)):
+            raise ValueError(
+                f"The random_coincidences shape {e.shape} must be equal to {(len(value_domain), len(value_domain))}."
+            )
+        if not np.isfinite(e).all() or (e < 0).any() or e.sum() <= 0:
+            raise ValueError("The random_coincidences matrix must be non-negative, finite, and have a positive sum.")
+        if not np.allclose(e, e.T):
+            raise ValueError("The random_coincidences matrix must be symmetric.")
+        return e, e.sum(axis=0), True
+    else:
+        e = _random_coincidences(n_v, dtype=dtype)
+        return e, n_v, False
+
+
 @overload
 def alpha(
     reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = ...,
@@ -1151,7 +1349,7 @@ def alpha(
 ) -> float | complex | np.inexact | AlphaResult[Any]: ...
 
 
-def alpha(  # noqa: C901
+def alpha(
     reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
     value_counts: npt.ArrayLike | None = None,
     value_domain: npt.ArrayLike | None = None,
@@ -1303,76 +1501,15 @@ def alpha(  # noqa: C901
     >>> print(round(alpha(bip_data, level_of_measurement="bipolar"), 4))
     0.7826
     """
-    if (reliability_data is None) == (value_counts is None):
-        raise ValueError("Either reliability_data or value_counts must be provided, but not both.")
-
-    subsample_params = [
-        all_reliability_data is not None,
-        all_value_counts is not None,
-        random_coincidences is not None,
-    ]
-    if sum(subsample_params) > 1:
-        raise ValueError(
-            "At most one of all_reliability_data, all_value_counts, or random_coincidences can be provided."
-        )
-
-    if all_reliability_data is not None:
-        all_rel_arr = np.asarray(all_reliability_data)
-        if all_rel_arr.ndim != 2:
-            raise ValueError("The all_reliability_data must be a 2D array.")
-
-    if reliability_data is not None:
-        if _is_dict_reliability_data(reliability_data):
-            if all_reliability_data is not None:
-                raise ValueError("Subsample with dict reliability_data is not supported.")
-            value_counts, value_domain = _dict_reliability_data_to_value_counts(
-                reliability_data,  # ty:ignore[invalid-argument-type]
-                value_domain,
-                level_of_measurement,
-            )
-        else:
-            rel_arr = np.asarray(reliability_data)
-            computed_value_domain = _domain_from_reliability_data(rel_arr)
-
-            if all_reliability_data is not None:
-                all_computed_domain = _domain_from_reliability_data(all_rel_arr)
-                combined_computed_domain = np.unique(np.concatenate([computed_value_domain, all_computed_domain]))
-            else:
-                combined_computed_domain = computed_value_domain
-
-            if value_domain is None:
-                kind = rel_arr.dtype.kind
-                all_kind = all_rel_arr.dtype.kind if all_reliability_data is not None else None
-                if (kind in {"U", "S"} or all_kind in {"U", "S"}) and level_of_measurement != "nominal":
-                    raise ValueError(
-                        "When using strings, an ordered value_domain is required"
-                        " for level_of_measurement other than 'nominal'."
-                    )
-                value_domain = combined_computed_domain
-            else:
-                value_domain = _to_domain_array(value_domain)
-                if not np.isin(computed_value_domain, value_domain).all():
-                    raise ValueError("The reliability data contains out-of-domain values.")
-                if all_reliability_data is not None and not np.isin(all_computed_domain, value_domain).all():
-                    raise ValueError("The reference reliability data contains out-of-domain values.")
-
-            value_counts = _reliability_data_to_value_counts(rel_arr, value_domain)
-    else:
-        value_counts = np.asarray(value_counts)
-
-        if value_domain is None:
-            value_domain = np.arange(value_counts.shape[1])
-        else:
-            value_domain = _to_domain_array(value_domain)
-
-        if value_counts.shape[1] != len(value_domain):
-            raise ValueError("The value domain should be equal to the number of columns of value_counts.")
-
-    if len(value_domain) <= 1:
-        raise ValueError("There has to be more than one value in the domain.")
-
-    if (value_counts.sum(axis=-1) <= 1).all():
-        raise ValueError("There has to be at least one unit with values assigned by at least two coders.")
+    value_counts, value_domain, all_rel_arr = _prepare_data_and_domain(
+        reliability_data=reliability_data,
+        value_counts=value_counts,
+        value_domain=value_domain,
+        level_of_measurement=level_of_measurement,
+        all_reliability_data=all_reliability_data,
+        all_value_counts=all_value_counts,
+        random_coincidences=random_coincidences,
+    )
 
     dtype = np.dtype(dtype)
     if not np.issubdtype(dtype, np.inexact):
@@ -1388,58 +1525,14 @@ def alpha(  # noqa: C901
     o = _coincidences(value_counts, dtype=dtype)
     n_v = o.sum(axis=0)
 
-    if all_reliability_data is not None:
-        all_rel = all_rel_arr
-        all_computed_domain = _domain_from_reliability_data(all_rel)
-        if not np.isin(all_computed_domain, value_domain).all():
-            raise ValueError("The reference reliability data contains out-of-domain values.")
-        all_counts = _reliability_data_to_value_counts(all_rel, value_domain)
-        if (all_counts.sum(axis=-1) <= 1).all():
-            raise ValueError(
-                "There has to be at least one unit in all_reliability_data with values assigned by at least two coders."
-            )
-        all_o = _coincidences(all_counts, dtype=dtype)
-        all_n_v = all_o.sum(axis=0)
-        e = _random_coincidences(all_n_v, dtype=dtype)
-        dist_n_v = all_n_v
-    elif all_value_counts is not None:
-        all_counts = np.asarray(all_value_counts)
-        if all_counts.ndim != 2:
-            raise ValueError("The all_value_counts must be a 2D array.")
-        if all_counts.shape[1] != len(value_domain):
-            raise ValueError("The number of columns of all_value_counts should be equal to the value domain length.")
-        if (
-            (
-                not np.issubdtype(all_counts.dtype, np.integer)
-                and not (np.issubdtype(all_counts.dtype, np.floating) and (all_counts % 1 == 0).all())
-            )
-            or not np.isfinite(all_counts).all()
-            or (all_counts < 0).any()
-        ):
-            raise ValueError("The all_value_counts must contain finite, non-negative integer counts.")
-        all_counts = all_counts.astype(np.int_, copy=False)
-        if (all_counts.sum(axis=-1) <= 1).all():
-            raise ValueError(
-                "There has to be at least one unit in all_value_counts with values assigned by at least two coders."
-            )
-        all_o = _coincidences(all_counts, dtype=dtype)
-        all_n_v = all_o.sum(axis=0)
-        e = _random_coincidences(all_n_v, dtype=dtype)
-        dist_n_v = all_n_v
-    elif random_coincidences is not None:
-        e = np.asarray(random_coincidences, dtype=dtype)
-        if e.shape != (len(value_domain), len(value_domain)):
-            raise ValueError(
-                f"The random_coincidences shape {e.shape} must be equal to {(len(value_domain), len(value_domain))}."
-            )
-        if not np.isfinite(e).all() or (e < 0).any() or e.sum() <= 0:
-            raise ValueError("The random_coincidences matrix must be non-negative, finite, and have a positive sum.")
-        if not np.allclose(e, e.T):
-            raise ValueError("The random_coincidences matrix must be symmetric.")
-        dist_n_v = e.sum(axis=0)
-    else:
-        e = _random_coincidences(n_v, dtype=dtype)
-        dist_n_v = n_v
+    e, dist_n_v, _ = _compute_expected_coincidences(
+        value_domain=value_domain,
+        n_v=n_v,
+        dtype=dtype,
+        all_rel_arr=all_rel_arr,
+        all_value_counts=all_value_counts,
+        random_coincidences=random_coincidences,
+    )
 
     d = _distances(value_domain, distance_metric, dist_n_v, dtype=dtype)
 
@@ -1451,3 +1544,552 @@ def alpha(  # noqa: C901
     if return_components:
         return AlphaResult(alpha=alpha_val, d_o=do, d_e=de)
     return alpha_val
+
+
+def _norm_cdf(x: float) -> float:
+    """Cumulative distribution function of standard normal distribution."""
+    if x < 0.0:
+        return 0.5 * math.erfc(-x / math.sqrt(2.0))
+    return 1.0 - 0.5 * math.erfc(x / math.sqrt(2.0))
+
+
+def _norm_ppf(p: float, *, lower_tail: bool = True) -> float:
+    """Quantile function (inverse CDF) of standard normal distribution.
+
+    Uses Acklam's rational approximation refined with Halley's method via erfc,
+    achieving full machine precision across extreme tails.
+    """
+    if p <= 0.0 or p >= 1.0:
+        raise ValueError("p must be in (0, 1).")
+
+    if not lower_tail:
+        return -_norm_ppf(p, lower_tail=True)
+    if p > 0.5:
+        return -_norm_ppf(1.0 - p, lower_tail=True)
+
+    # Acklam's rational approximation coefficients for lower tail (p <= 0.5)
+    a = [
+        -3.969683028665376e01,
+        2.209460984245205e02,
+        -2.759285104469687e02,
+        1.383577518672690e02,
+        -3.066479806614716e01,
+        2.506628277459239e00,
+    ]
+    b = [
+        -5.447609879822406e01,
+        1.615858368580409e02,
+        -1.556989798598866e02,
+        6.680131188771972e01,
+        -1.328068155288572e01,
+    ]
+    c = [
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e00,
+        -2.549732539343734e00,
+        4.374664141464968e00,
+        2.938163982698783e00,
+    ]
+    d = [
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e00,
+        3.754408661907416e00,
+    ]
+
+    p_low = 0.02425
+    if p < p_low:
+        q = math.sqrt(-2.0 * math.log(p))
+        x = (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / (
+            (((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0
+        )
+    else:
+        q = p - 0.5
+        r = q * q
+        x = (
+            (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5])
+            * q
+            / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0)
+        )
+
+    # Halley's method refinement steps using erfc for extreme tail numerical stability
+    inv_sqrt2pi = 1.0 / math.sqrt(2.0 * math.pi)
+    for _ in range(2):
+        err = 0.5 * math.erfc(-x / math.sqrt(2.0)) - p
+        pdf = inv_sqrt2pi * math.exp(-0.5 * x * x)
+        if pdf == 0.0:
+            break
+        delta = err / pdf
+        x = x - delta / (1.0 + 0.5 * x * delta)
+
+    return x
+
+
+def _get_rng(random_state: int | np.random.Generator | np.random.RandomState | None) -> np.random.Generator:
+    """Convert seed, Generator, or RandomState into a Generator."""
+    if isinstance(random_state, np.random.Generator):
+        return random_state
+    if isinstance(random_state, (int, np.integer)):
+        return np.random.default_rng(int(random_state))
+    if isinstance(random_state, np.random.RandomState):
+        seed = int(random_state.randint(0, 2**31 - 1))
+        return np.random.default_rng(seed)
+    if random_state is None:
+        return np.random.default_rng()
+    raise ValueError(f"Invalid random_state: {random_state!r}. Expected int, Generator, RandomState, or None.")
+
+
+def _is_metric_marginal_dependent(metric_spec: LevelOfMeasurement) -> bool:
+    """Check whether the distance metric depends on marginal counts n_v."""
+    if isinstance(metric_spec, str):
+        return metric_spec == "ordinal"
+    # If the callable explicitly declares independence, honor it
+    if getattr(metric_spec, "marginal_dependent", None) is False:
+        return False
+    # Treat custom callables as marginal-dependent by default because n_v is in the metric protocol
+    return True
+
+
+def _compute_bca_interval(
+    valid_alphas: npt.NDArray[np.floating],
+    observed_alpha: float | np.floating,
+    confidence_level: float,
+    num_u: npt.NDArray | None,
+    den_u: npt.NDArray,
+    nv_matrix: npt.NDArray,
+    d: npt.NDArray | None,
+    de_fixed: float | np.floating | None,
+    fallback_pct: tuple[float, float],
+    domain: npt.NDArray | None = None,
+    distance_metric: DistanceMetric | None = None,
+    counts: npt.NDArray | None = None,
+    weights: npt.NDArray | None = None,
+    dtype: np.dtype = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
+    is_marginal_dependent: bool = False,
+) -> tuple[float, float]:
+    """Compute Bias-Corrected and Accelerated (BCa) bootstrap confidence interval."""
+    n_units = len(den_u)
+    if n_units < 3 or len(valid_alphas) < 3:
+        warnings.warn(
+            "BCa bootstrap interval requires at least 3 units and 3 valid replicates; "
+            "falling back to percentile interval.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
+
+    prop = float(np.mean(valid_alphas < observed_alpha))
+    n_boot = len(valid_alphas)
+    prop = min(max(prop, 1.0 / (2.0 * n_boot)), 1.0 - 1.0 / (2.0 * n_boot))
+    z0 = _norm_ppf(prop)
+
+    # Compute jackknife leave-one-out totals in linear memory without constructing an (N x N) matrix
+    total_den = float(np.sum(den_u))
+    n_j = total_den - den_u
+    valid_j = n_j > 1
+    safe_nj = np.maximum(n_j, 2)
+
+    if is_marginal_dependent:
+        assert counts is not None and weights is not None and domain is not None and distance_metric is not None
+        v_len = counts.shape[1]
+        diag_idx = np.arange(v_len)
+        o_total = counts.T @ weights
+        o_total[diag_idx, diag_idx] -= weights.sum(axis=0)
+        total_nv = np.sum(nv_matrix, axis=0)
+        alpha_jack = np.empty(n_units, dtype=dtype)
+        for u in range(n_units):
+            nu = n_j[u]
+            if nu <= 1:
+                alpha_jack[u] = np.nan
+                continue
+            nv_u = total_nv - nv_matrix[u]
+            cu = counts[u]
+            wu = weights[u]
+            ou_unit = np.outer(cu, wu)
+            ou_unit[diag_idx, diag_idx] -= wu
+            ou = o_total - ou_unit
+            eu = _random_coincidences(nv_u, dtype=dtype)
+            du = _distances(domain, distance_metric, nv_u, dtype=dtype)
+            deu = (eu * du).sum() / nu
+            if deu == 0.0:
+                alpha_jack[u] = np.nan
+                continue
+            dou = (ou * du).sum() / nu
+            alpha_jack[u] = 1.0 - dou / deu
+    elif de_fixed is not None:
+        assert num_u is not None
+        total_num = float(np.sum(num_u))
+        num_j = total_num - num_u
+        do_j = np.where(valid_j, num_j / safe_nj, np.nan)
+        alpha_jack = np.where(valid_j, 1.0 - do_j / de_fixed, np.nan)
+    else:
+        assert num_u is not None and d is not None
+        total_num = float(np.sum(num_u))
+        num_j = total_num - num_u
+        total_nv = np.sum(nv_matrix, axis=0)
+        nv_j = total_nv - nv_matrix
+        do_j = np.where(valid_j, num_j / safe_nj, np.nan)
+        quad_j = np.sum((nv_j @ d) * nv_j, axis=1)
+        diag_j = nv_j @ np.diag(d)
+        de_j = np.where(valid_j, (quad_j - diag_j) / (safe_nj * (safe_nj - 1)), 0.0)
+        valid_mask_j = valid_j & (de_j > 0.0)
+        safe_de_min = float(np.finfo(dtype).tiny)
+        alpha_jack = np.where(valid_mask_j, 1.0 - do_j / np.maximum(de_j, safe_de_min), np.nan)
+
+    if not np.all(np.isfinite(alpha_jack)):
+        warnings.warn(
+            "BCa jackknife acceleration could not be computed (one or more leave-one-out estimates were undefined); "
+            "falling back to percentile interval.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
+
+    mean_j = float(np.mean(alpha_jack))
+    diff_j = mean_j - alpha_jack
+    denom_a = 6.0 * (float(np.sum(diff_j**2)) ** 1.5)
+    a = float(np.sum(diff_j**3) / denom_a) if denom_a > 0.0 else 0.0
+
+    alpha_tail = (1.0 - confidence_level) / 2.0
+    z_low = _norm_ppf(alpha_tail)
+    z_high = -z_low
+
+    denom_low = 1.0 - a * (z0 + z_low)
+    denom_high = 1.0 - a * (z0 + z_high)
+
+    if denom_low == 0.0 or denom_high == 0.0:
+        warnings.warn(
+            "BCa acceleration denominator was zero; falling back to percentile interval.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
+
+    p_low = _norm_cdf(z0 + (z0 + z_low) / denom_low)
+    p_high = _norm_cdf(z0 + (z0 + z_high) / denom_high)
+
+    p_low = min(max(p_low, 0.0), 1.0)
+    p_high = min(max(p_high, 0.0), 1.0)
+
+    if p_low >= p_high:
+        warnings.warn(
+            "BCa adjusted quantiles were degenerate; falling back to percentile interval.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return float(np.percentile(valid_alphas, fallback_pct[0])), float(np.percentile(valid_alphas, fallback_pct[1]))
+
+    return float(np.percentile(valid_alphas, 100.0 * p_low)), float(np.percentile(valid_alphas, 100.0 * p_high))
+
+
+def bootstrap_ci(  # noqa: C901
+    reliability_data: npt.ArrayLike | Mapping[Any, Mapping[Any, Any]] | Sequence[Mapping[Any, Any]] | None = None,
+    value_counts: npt.ArrayLike | None = None,
+    value_domain: npt.ArrayLike | None = None,
+    level_of_measurement: LevelOfMeasurement = "interval",
+    dtype: npt.DTypeLike = DEFAULT_DTYPE,
+    *,
+    confidence_level: float = 0.95,
+    n_resamples: int = 2000,
+    alternative_threshold: float | None = None,
+    method: Literal["percentile", "bca", "basic", "normal"] = "percentile",
+    random_state: int | np.random.Generator | np.random.RandomState | None = None,
+    all_reliability_data: npt.ArrayLike | None = None,
+    all_value_counts: npt.ArrayLike | None = None,
+    random_coincidences: npt.ArrayLike | None = None,
+    return_distribution: bool = False,
+) -> BootstrapResult:
+    """Compute bootstrap confidence intervals and statistical significance test for Krippendorff's alpha.
+
+    This function resamples units with replacement using a vectorized decomposition of observed coincidences,
+    achieving extreme performance (thousands of resamples in milliseconds).
+
+    Parameters
+    ----------
+    reliability_data : array_like or mapping or sequence of mappings, optional
+        Reliability data matrix with shape `(M, N)` (where `M` is the number of coders/raters and `N` is the
+        number of units/items), or dictionary representation. Missing values are represented by `np.nan`.
+        Either `reliability_data` or `value_counts` must be provided, but not both.
+    value_counts : array_like, with shape (N, V), optional
+        Number of coders that assigned a certain value to a determined unit, where N is the number of units
+        and V is the value domain length.
+    value_domain : array_like, with shape (V,), optional
+        Possible values the units can take. If None, it is inferred from data.
+    level_of_measurement : string or callable, default "interval"
+        Metric for difference measurement. One of "nominal", "ordinal", "interval", "ratio", "circular",
+        "bipolar", "polar", or a custom DistanceMetric callable. For custom callable metrics, distances
+        are recomputed per bootstrap resample by default (since DistanceMetric accepts marginal counts n_v).
+        If a custom metric does not depend on marginals, setting `metric.marginal_dependent = False` enables
+        the faster vectorized bootstrap path.
+    dtype : data-type, default np.float64
+        Computation data type (must be an inexact, non-complex float type).
+    confidence_level : float, default 0.95
+        Confidence level for the bootstrap confidence interval (strictly between 0 and 1).
+    n_resamples : int, default 2000
+        Number of bootstrap resamples to draw.
+    alternative_threshold : float, optional
+        Acceptable reliability benchmark $\\alpha_{\\text{min}}$ (e.g. 0.800 or 0.667).
+        When specified, calculates Krippendorff's $q$-value: the empirical probability
+        $q = P(\\alpha^* < \\alpha_{\\text{min}})$ that true reliability fails to reach the threshold.
+        When degenerate resamples occur (omitted with a warning), $q$ is estimated conditionally
+        over all valid resamples: $P(\\alpha^* < \\alpha_{\\text{min}} \\mid \\alpha^* \\text{ is defined})$.
+    method : {"percentile", "bca", "basic", "normal"}, default "percentile"
+        Bootstrap confidence interval method:
+        - "percentile": Empirical percentiles of bootstrap distribution (standard in Krippendorff literature).
+        - "bca": Bias-corrected and accelerated bootstrap interval.
+        - "basic": Empirical pivotal bootstrap interval ($2\\hat{\\alpha} - \\alpha^*_{(1-p/2)}, 2\\hat{\\alpha} -
+          \\alpha^*_{(p/2)}$).
+        - "normal": Normal approximation interval using bootstrap standard error ($\\hat{\\alpha} \\pm z \\cdot
+          \\text{SE}$).
+    random_state : int, Generator, RandomState, or None, optional
+        Seed or random number generator for reproducible bootstrap draws.
+    all_reliability_data : array_like, optional
+        Reference population reliability data for subsample bootstrapping.
+    all_value_counts : array_like, optional
+        Reference population value counts for subsample bootstrapping.
+    random_coincidences : array_like, optional
+        Precomputed expected coincidences matrix.
+    return_distribution : bool, default False
+        If True, the resulting `BootstrapResult.resamples` contains the array of all $B$ bootstrap estimates.
+
+    Returns
+    -------
+    result : BootstrapResult
+        Named tuple containing:
+        - `alpha`: observed point estimate.
+        - `confidence_interval`: `(ci_low, ci_high)` tuple.
+        - `standard_error`: estimated bootstrap standard error.
+        - `q_value`: Krippendorff $q$-value if `alternative_threshold` is provided, else None.
+        - `resamples`: array of shape `(n_resamples,)` if `return_distribution` is True, else None.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> data = [
+    ...     [np.nan, np.nan, np.nan, np.nan, np.nan, 3, 4, 1, 2, 1, 1, 3, 3, np.nan, 3],
+    ...     [1, np.nan, 2, 1, 3, 3, 4, 3, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+    ...     [np.nan, np.nan, 2, 1, 3, 4, 4, np.nan, 2, 1, 1, 3, 3, np.nan, 4],
+    ... ]
+    >>> res = bootstrap_ci(data, level_of_measurement="nominal", random_state=42)
+    >>> round(res.alpha, 3)
+    0.691
+    >>> round(res.ci_low, 3) <= round(res.alpha, 3) <= round(res.ci_high, 3)
+    True
+    """
+    if not (isinstance(confidence_level, (int, float, np.floating)) and 0.0 < confidence_level < 1.0):
+        raise ValueError("confidence_level must be between 0 and 1.")
+
+    if not (isinstance(n_resamples, (int, np.integer)) and n_resamples >= 2):
+        raise ValueError("n_resamples must be an integer >= 2.")
+
+    if method not in ("percentile", "bca", "basic", "normal"):
+        raise ValueError(f"Invalid method {method!r}. Expected one of 'percentile', 'bca', 'basic', 'normal'.")
+
+    if alternative_threshold is not None:
+        if not (
+            isinstance(alternative_threshold, (int, float, np.floating))
+            and np.isfinite(alternative_threshold)
+            and not isinstance(alternative_threshold, bool)
+        ):
+            raise ValueError("alternative_threshold must be a finite real number.")
+
+    dtype_dt = np.dtype(dtype)
+    if not np.issubdtype(dtype_dt, np.inexact):
+        raise ValueError("`dtype` must be an inexact type.")
+    if np.issubdtype(dtype_dt, np.complexfloating):
+        raise ValueError("bootstrap_ci does not support complex dtypes.")
+
+    counts, domain, all_rel_arr = _prepare_data_and_domain(
+        reliability_data=reliability_data,
+        value_counts=value_counts,
+        value_domain=value_domain,
+        level_of_measurement=level_of_measurement,
+        all_reliability_data=all_reliability_data,
+        all_value_counts=all_value_counts,
+        random_coincidences=random_coincidences,
+    )
+
+    if level_of_measurement in ("interval", "ratio", "circular", "bipolar", "polar") and (
+        np.iscomplexobj(domain) or any(isinstance(v, (complex, np.complexfloating)) for v in domain)
+    ):
+        raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
+
+    obs_res = alpha(
+        value_counts=counts,
+        value_domain=domain,
+        level_of_measurement=level_of_measurement,
+        dtype=dtype,
+        all_reliability_data=all_reliability_data,
+        all_value_counts=all_value_counts,
+        random_coincidences=random_coincidences,
+        return_components=True,
+    )
+    observed_alpha = obs_res.alpha
+
+    has_ref = all_reliability_data is not None or all_value_counts is not None or random_coincidences is not None
+    de_fixed = obs_res.d_e if has_ref else None
+
+    distance_metric = _distance_metric(level_of_measurement)
+
+    n_units, v_domain_len = counts.shape
+    counts_float = counts.astype(dtype_dt, copy=False)
+    pairable = counts.sum(axis=1)
+    valid_units = pairable >= 2
+    safe_denom = np.maximum(pairable - 1, 1)[:, np.newaxis].astype(dtype_dt, copy=False)
+    weights = np.where(
+        valid_units[:, np.newaxis],
+        np.divide(counts_float, safe_denom, dtype=dtype_dt),
+        dtype_dt.type(0.0),
+    )
+    den_u = np.where(valid_units, pairable, 0).astype(dtype_dt, copy=False)
+    nv_matrix = np.where(valid_units[:, np.newaxis], counts_float, dtype_dt.type(0.0))
+
+    is_marginal_dep = de_fixed is None and _is_metric_marginal_dependent(level_of_measurement)
+
+    if not is_marginal_dep:
+        n_v = counts_float[valid_units].sum(axis=0, dtype=dtype_dt)
+        _, dist_n_v, _ = _compute_expected_coincidences(
+            value_domain=domain,
+            n_v=n_v,
+            dtype=dtype_dt,
+            all_rel_arr=all_rel_arr,
+            all_value_counts=all_value_counts,
+            random_coincidences=random_coincidences,
+        )
+        d: npt.NDArray | None = _distances(domain, distance_metric, dist_n_v, dtype=dtype_dt)
+        wd = weights @ d.T
+        num_u: npt.NDArray | None = np.sum(counts_float * wd, axis=1) - np.sum(weights * np.diag(d), axis=1)
+    else:
+        d = None
+        num_u = None
+
+    rng = _get_rng(random_state)
+    p_units = [1.0 / n_units] * n_units
+    per_resample = n_units + (v_domain_len * v_domain_len if is_marginal_dep else v_domain_len)
+    batch_size = min(n_resamples, max(1, 1_000_000 // max(per_resample, 1)))
+
+    diag_idx = np.arange(v_domain_len) if is_marginal_dep else None
+
+    alpha_star = np.empty(n_resamples, dtype=dtype_dt)
+    for start in range(0, n_resamples, batch_size):
+        end = min(start + batch_size, n_resamples)
+        b_count = end - start
+        w_batch = rng.multinomial(n_units, p_units, size=b_count)
+
+        if is_marginal_dep:
+            assert diag_idx is not None
+            unit_chunk_size = max(1, 100_000 // max(v_domain_len, 1))
+            for i in range(b_count):
+                w_i = w_batch[i].astype(dtype_dt, copy=False)
+                nb = float(w_i @ den_u)
+                if nb <= 1.0:
+                    alpha_star[start + i] = np.nan
+                    continue
+
+                nz = np.flatnonzero(w_i)
+                o_b = np.zeros((v_domain_len, v_domain_len), dtype=dtype_dt)
+                diag_sub = np.zeros(v_domain_len, dtype=dtype_dt)
+                for chunk_start in range(0, len(nz), unit_chunk_size):
+                    chunk_nz = nz[chunk_start : chunk_start + unit_chunk_size]
+                    w_chunk = w_i[chunk_nz]
+                    c_chunk = counts_float[chunk_nz]
+                    wgt_chunk = weights[chunk_nz]
+                    c_w_chunk = w_chunk[:, np.newaxis] * c_chunk
+                    o_b += c_w_chunk.T @ wgt_chunk
+                    diag_sub += w_chunk @ wgt_chunk
+
+                o_b[diag_idx, diag_idx] -= diag_sub
+
+                nv_b = np.sum(o_b, axis=1)
+                e_b = _random_coincidences(nv_b, dtype=dtype_dt)
+                d_b = _distances(domain, distance_metric, nv_b, dtype=dtype_dt)
+                deb = (e_b * d_b).sum() / nb
+                if deb == 0.0:
+                    alpha_star[start + i] = np.nan
+                    continue
+                dob = (o_b * d_b).sum() / nb
+                alpha_star[start + i] = 1.0 - dob / deb
+        else:
+            w_batch_fl = w_batch.astype(dtype_dt, copy=False)
+            assert num_u is not None
+            num_star = w_batch_fl @ num_u
+            n_star = w_batch_fl @ den_u
+            valid_n = n_star > 1
+            safe_n = np.maximum(n_star, 2)
+            do_star = np.where(valid_n, num_star / safe_n, np.nan)
+
+            if de_fixed is not None:
+                de_star = np.full(b_count, de_fixed, dtype=dtype_dt)
+            else:
+                assert d is not None
+                nv_star = w_batch_fl @ nv_matrix
+                quad = np.sum((nv_star @ d) * nv_star, axis=1)
+                diag_term = nv_star @ np.diag(d)
+                de_denom = safe_n * (safe_n - 1)
+                de_star = np.where(valid_n, (quad - diag_term) / de_denom, 0.0)
+
+            valid_mask = valid_n & (de_star > 0.0)
+            safe_de_min = dtype_dt.type(np.finfo(dtype_dt).tiny)
+            alpha_star[start:end] = np.where(valid_mask, 1.0 - do_star / np.maximum(de_star, safe_de_min), np.nan)
+
+    finite_mask = np.isfinite(alpha_star)
+    valid_alphas = alpha_star[finite_mask]
+    n_invalid = n_resamples - len(valid_alphas)
+    if len(valid_alphas) < 2:
+        raise ValueError(
+            "Fewer than 2 valid bootstrap resamples could be estimated "
+            "(resamples had zero expected disagreement or fewer than 2 pairable ratings)."
+        )
+    if n_invalid > 0:
+        warnings.warn(
+            f"{n_invalid} of {n_resamples} bootstrap resamples had zero expected disagreement "
+            "or fewer than 2 pairable ratings, and were omitted from confidence interval estimation.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    se = float(np.std(valid_alphas, ddof=1))
+
+    alpha_low_pct = 100.0 * (1.0 - confidence_level) / 2.0
+    alpha_high_pct = 100.0 - alpha_low_pct
+
+    if method == "percentile":
+        ci_low = float(np.percentile(valid_alphas, alpha_low_pct))
+        ci_high = float(np.percentile(valid_alphas, alpha_high_pct))
+    elif method == "basic":
+        ci_low = float(2.0 * observed_alpha - np.percentile(valid_alphas, alpha_high_pct))
+        ci_high = float(2.0 * observed_alpha - np.percentile(valid_alphas, alpha_low_pct))
+    elif method == "normal":
+        alpha_tail = (1.0 - confidence_level) / 2.0
+        z = -_norm_ppf(alpha_tail)
+        ci_low = float(observed_alpha - z * se)
+        ci_high = float(observed_alpha + z * se)
+    elif method == "bca":
+        ci_low, ci_high = _compute_bca_interval(
+            valid_alphas=valid_alphas,
+            observed_alpha=observed_alpha,
+            confidence_level=confidence_level,
+            num_u=num_u,
+            den_u=den_u,
+            nv_matrix=nv_matrix,
+            d=d,
+            de_fixed=de_fixed,
+            fallback_pct=(alpha_low_pct, alpha_high_pct),
+            domain=domain,
+            distance_metric=distance_metric,
+            counts=counts_float,
+            weights=weights,
+            dtype=dtype_dt,
+            is_marginal_dependent=is_marginal_dep,
+        )
+
+    q_val = float(np.mean(valid_alphas < alternative_threshold)) if alternative_threshold is not None else None
+
+    return BootstrapResult(
+        alpha=float(observed_alpha),
+        confidence_interval=(ci_low, ci_high),
+        standard_error=se,
+        q_value=q_val,
+        resamples=alpha_star if return_distribution else None,
+    )

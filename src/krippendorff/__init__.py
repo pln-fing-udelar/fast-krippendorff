@@ -1,6 +1,7 @@
 from .krippendorff import (
     DEFAULT_DTYPE,
     AlphaResult,
+    BootstrapResult,
     DistanceMetric,
     KrippendorffResult,
     LevelOfMeasurement,
@@ -8,6 +9,7 @@ from .krippendorff import (
     ValueScalarType,
     alpha,
     bipolar_metric,
+    bootstrap_ci,
     circular_metric,
     polar_metric,
 )
@@ -15,6 +17,7 @@ from .krippendorff import (
 __all__ = [
     "DEFAULT_DTYPE",
     "AlphaResult",
+    "BootstrapResult",
     "DistanceMetric",
     "KrippendorffResult",
     "LevelOfMeasurement",
@@ -22,6 +25,7 @@ __all__ = [
     "ValueScalarType",
     "alpha",
     "bipolar_metric",
+    "bootstrap_ci",
     "circular_metric",
     "polar_metric",
 ]
