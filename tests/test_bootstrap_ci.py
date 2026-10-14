@@ -662,6 +662,16 @@ def test_bootstrap_ci_bca_zero_denominator_fallback(monkeypatch: pytest.MonkeyPa
     assert res.ci_low <= res.alpha <= res.ci_high
 
 
+def test_bootstrap_ci_dtype(nominal_data: list[list[float]]) -> None:
+    res32 = bootstrap_ci(nominal_data, dtype=np.float32, return_distribution=True, random_state=42)
+    assert res32.resamples is not None
+    assert res32.resamples.dtype == np.float32
+
+    res64 = bootstrap_ci(nominal_data, dtype=np.float64, return_distribution=True, random_state=42)
+    assert res64.resamples is not None
+    assert res64.resamples.dtype == np.float64
+
+
 def test_package_exports() -> None:
     assert hasattr(krippendorff, "bootstrap_ci")
     assert hasattr(krippendorff, "BootstrapResult")

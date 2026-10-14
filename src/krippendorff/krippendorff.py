@@ -1697,7 +1697,7 @@ def _compute_bca_interval(
         o_total = counts.T @ weights
         o_total[diag_idx, diag_idx] -= weights.sum(axis=0)
         total_nv = np.sum(nv_matrix, axis=0)
-        alpha_jack = np.empty(n_units, dtype=float)
+        alpha_jack = np.empty(n_units, dtype=dtype)
         for u in range(n_units):
             nu = n_j[u]
             if nu <= 1:
@@ -1734,7 +1734,8 @@ def _compute_bca_interval(
         diag_j = nv_j @ np.diag(d)
         de_j = np.where(valid_j, (quad_j - diag_j) / (safe_nj * (safe_nj - 1)), 0.0)
         valid_mask_j = valid_j & (de_j > 0.0)
-        alpha_jack = np.where(valid_mask_j, 1.0 - do_j / np.maximum(de_j, 1e-300), np.nan)
+        safe_de_min = float(np.finfo(dtype).tiny)
+        alpha_jack = np.where(valid_mask_j, 1.0 - do_j / np.maximum(de_j, safe_de_min), np.nan)
 
     if not np.all(np.isfinite(alpha_jack)):
         warnings.warn(
@@ -1932,17 +1933,22 @@ def bootstrap_ci(  # noqa: C901
     distance_metric = _distance_metric(level_of_measurement)
 
     n_units, v_domain_len = counts.shape
+    counts_float = counts.astype(dtype_dt, copy=False)
     pairable = counts.sum(axis=1)
     valid_units = pairable >= 2
-    safe_denom = np.maximum(pairable - 1, 1)[:, np.newaxis]
-    weights = np.where(valid_units[:, np.newaxis], counts / safe_denom, 0.0)
-    den_u = np.where(valid_units, pairable, 0.0)
-    nv_matrix = np.where(valid_units[:, np.newaxis], counts, 0.0)
+    safe_denom = np.maximum(pairable - 1, 1)[:, np.newaxis].astype(dtype_dt, copy=False)
+    weights = np.where(
+        valid_units[:, np.newaxis],
+        np.divide(counts_float, safe_denom, dtype=dtype_dt),
+        dtype_dt.type(0.0),
+    )
+    den_u = np.where(valid_units, pairable, 0).astype(dtype_dt, copy=False)
+    nv_matrix = np.where(valid_units[:, np.newaxis], counts_float, dtype_dt.type(0.0))
 
     is_marginal_dep = de_fixed is None and _is_metric_marginal_dependent(level_of_measurement)
 
     if not is_marginal_dep:
-        n_v = counts[valid_units].sum(axis=0, dtype=dtype_dt)
+        n_v = counts_float[valid_units].sum(axis=0, dtype=dtype_dt)
         _, dist_n_v, _ = _compute_expected_coincidences(
             value_domain=domain,
             n_v=n_v,
@@ -1953,7 +1959,7 @@ def bootstrap_ci(  # noqa: C901
         )
         d: npt.NDArray | None = _distances(domain, distance_metric, dist_n_v, dtype=dtype_dt)
         wd = weights @ d.T
-        num_u: npt.NDArray | None = np.sum(counts * wd, axis=1) - np.sum(weights * np.diag(d), axis=1)
+        num_u: npt.NDArray | None = np.sum(counts_float * wd, axis=1) - np.sum(weights * np.diag(d), axis=1)
     else:
         d = None
         num_u = None
@@ -1965,7 +1971,7 @@ def bootstrap_ci(  # noqa: C901
 
     diag_idx = np.arange(v_domain_len) if is_marginal_dep else None
 
-    alpha_star = np.empty(n_resamples, dtype=float)
+    alpha_star = np.empty(n_resamples, dtype=dtype_dt)
     for start in range(0, n_resamples, batch_size):
         end = min(start + batch_size, n_resamples)
         b_count = end - start
@@ -1975,9 +1981,9 @@ def bootstrap_ci(  # noqa: C901
             assert diag_idx is not None
             unit_chunk_size = max(1, 100_000 // max(v_domain_len, 1))
             for i in range(b_count):
-                w_i = w_batch[i]
+                w_i = w_batch[i].astype(dtype_dt, copy=False)
                 nb = float(w_i @ den_u)
-                if nb <= 1:
+                if nb <= 1.0:
                     alpha_star[start + i] = np.nan
                     continue
 
@@ -1987,7 +1993,7 @@ def bootstrap_ci(  # noqa: C901
                 for chunk_start in range(0, len(nz), unit_chunk_size):
                     chunk_nz = nz[chunk_start : chunk_start + unit_chunk_size]
                     w_chunk = w_i[chunk_nz]
-                    c_chunk = counts[chunk_nz]
+                    c_chunk = counts_float[chunk_nz]
                     wgt_chunk = weights[chunk_nz]
                     c_w_chunk = w_chunk[:, np.newaxis] * c_chunk
                     o_b += c_w_chunk.T @ wgt_chunk
@@ -2005,17 +2011,18 @@ def bootstrap_ci(  # noqa: C901
                 dob = (o_b * d_b).sum() / nb
                 alpha_star[start + i] = 1.0 - dob / deb
         else:
+            w_batch_fl = w_batch.astype(dtype_dt, copy=False)
             assert num_u is not None
-            num_star = w_batch @ num_u
-            n_star = w_batch @ den_u
-            nv_star = w_batch @ nv_matrix
+            num_star = w_batch_fl @ num_u
+            n_star = w_batch_fl @ den_u
+            nv_star = w_batch_fl @ nv_matrix
 
             valid_n = n_star > 1
             safe_n = np.maximum(n_star, 2)
             do_star = np.where(valid_n, num_star / safe_n, np.nan)
 
             if de_fixed is not None:
-                de_star = np.full(b_count, de_fixed, dtype=float)
+                de_star = np.full(b_count, de_fixed, dtype=dtype_dt)
             else:
                 assert d is not None
                 quad = np.sum((nv_star @ d) * nv_star, axis=1)
@@ -2024,7 +2031,8 @@ def bootstrap_ci(  # noqa: C901
                 de_star = np.where(valid_n, (quad - diag_term) / de_denom, 0.0)
 
             valid_mask = valid_n & (de_star > 0.0)
-            alpha_star[start:end] = np.where(valid_mask, 1.0 - do_star / np.maximum(de_star, 1e-300), np.nan)
+            safe_de_min = dtype_dt.type(np.finfo(dtype_dt).tiny)
+            alpha_star[start:end] = np.where(valid_mask, 1.0 - do_star / np.maximum(de_star, safe_de_min), np.nan)
 
     finite_mask = np.isfinite(alpha_star)
     valid_alphas = alpha_star[finite_mask]
@@ -2071,7 +2079,7 @@ def bootstrap_ci(  # noqa: C901
             fallback_pct=(alpha_low_pct, alpha_high_pct),
             domain=domain,
             distance_metric=distance_metric,
-            counts=counts,
+            counts=counts_float,
             weights=weights,
             dtype=dtype_dt,
             is_marginal_dependent=is_marginal_dep,
