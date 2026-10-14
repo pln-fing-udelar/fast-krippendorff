@@ -1969,21 +1969,27 @@ def bootstrap_ci(  # noqa: C901
 
         if is_marginal_dep:
             assert diag_idx is not None
+            unit_chunk_size = max(1, 100_000 // max(v_domain_len, 1))
             for i in range(b_count):
                 w_i = w_batch[i]
-                nz = np.flatnonzero(w_i)
-                w_nz = w_i[nz]
-                c_nz = counts[nz]
-                wgt_nz = weights[nz]
-
-                nb = float(np.sum(w_nz * den_u[nz]))
+                nb = float(w_i @ den_u)
                 if nb <= 1:
                     alpha_star[start + i] = np.nan
                     continue
 
-                c_w = w_nz[:, np.newaxis] * c_nz
-                o_b = c_w.T @ wgt_nz
-                o_b[diag_idx, diag_idx] -= w_nz @ wgt_nz
+                nz = np.flatnonzero(w_i)
+                o_b = np.zeros((v_domain_len, v_domain_len), dtype=dtype_dt)
+                diag_sub = np.zeros(v_domain_len, dtype=dtype_dt)
+                for chunk_start in range(0, len(nz), unit_chunk_size):
+                    chunk_nz = nz[chunk_start : chunk_start + unit_chunk_size]
+                    w_chunk = w_i[chunk_nz]
+                    c_chunk = counts[chunk_nz]
+                    wgt_chunk = weights[chunk_nz]
+                    c_w_chunk = w_chunk[:, np.newaxis] * c_chunk
+                    o_b += c_w_chunk.T @ wgt_chunk
+                    diag_sub += w_chunk @ wgt_chunk
+
+                o_b[diag_idx, diag_idx] -= diag_sub
 
                 nv_b = np.sum(o_b, axis=1)
                 e_b = _random_coincidences(nv_b, dtype=dtype_dt)

@@ -460,12 +460,32 @@ def test_bootstrap_ci_bca_jackknife_incomplete_fallback() -> None:
 
 
 def test_bootstrap_ci_large_domain_budgeting() -> None:
-    # Large domain V=100 with ordinal metric adjusts batch size safely below 50
+    # Explicit large domain V=200 forces batch size = 24 (< 50) and exercises multi-batch path
     rng = np.random.default_rng(42)
-    data = rng.integers(0, 100, size=(2, 10))
-    res = bootstrap_ci(data, level_of_measurement="ordinal", n_resamples=100, random_state=42)
+    domain = np.arange(200)
+    data = rng.choice(domain, size=(2, 10))
+    res = bootstrap_ci(
+        data,
+        value_domain=domain,
+        level_of_measurement="ordinal",
+        n_resamples=100,
+        random_state=42,
+    )
     assert np.isfinite(res.alpha)
     assert res.ci_low <= res.ci_high
+
+    # Explicit domain V=1000 with 250 units forces both sub-50 batch size and unit chunking
+    domain_large = np.arange(1000)
+    data_chunked = rng.choice(domain_large, size=(2, 250))
+    res_chunked = bootstrap_ci(
+        data_chunked,
+        value_domain=domain_large,
+        level_of_measurement="ordinal",
+        n_resamples=5,
+        random_state=42,
+    )
+    assert np.isfinite(res_chunked.alpha)
+    assert res_chunked.ci_low <= res_chunked.ci_high
 
 
 def test_package_exports() -> None:
