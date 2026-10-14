@@ -1653,13 +1653,13 @@ def _is_metric_marginal_dependent(metric_spec: LevelOfMeasurement) -> bool:
 
 def _compute_bca_interval(
     valid_alphas: npt.NDArray[np.floating],
-    observed_alpha: float,
+    observed_alpha: float | np.floating,
     confidence_level: float,
     num_u: npt.NDArray | None,
     den_u: npt.NDArray,
     nv_matrix: npt.NDArray,
     d: npt.NDArray | None,
-    de_fixed: float | None,
+    de_fixed: float | np.floating | None,
     fallback_pct: tuple[float, float],
     domain: npt.NDArray | None = None,
     distance_metric: DistanceMetric | None = None,
@@ -1925,10 +1925,10 @@ def bootstrap_ci(  # noqa: C901
         random_coincidences=random_coincidences,
         return_components=True,
     )
-    observed_alpha = float(obs_res.alpha)
+    observed_alpha = obs_res.alpha
 
     has_ref = all_reliability_data is not None or all_value_counts is not None or random_coincidences is not None
-    de_fixed = float(obs_res.d_e) if has_ref else None
+    de_fixed = obs_res.d_e if has_ref else None
 
     distance_metric = _distance_metric(level_of_measurement)
 
@@ -2015,8 +2015,6 @@ def bootstrap_ci(  # noqa: C901
             assert num_u is not None
             num_star = w_batch_fl @ num_u
             n_star = w_batch_fl @ den_u
-            nv_star = w_batch_fl @ nv_matrix
-
             valid_n = n_star > 1
             safe_n = np.maximum(n_star, 2)
             do_star = np.where(valid_n, num_star / safe_n, np.nan)
@@ -2025,6 +2023,7 @@ def bootstrap_ci(  # noqa: C901
                 de_star = np.full(b_count, de_fixed, dtype=dtype_dt)
             else:
                 assert d is not None
+                nv_star = w_batch_fl @ nv_matrix
                 quad = np.sum((nv_star @ d) * nv_star, axis=1)
                 diag_term = nv_star @ np.diag(d)
                 de_denom = safe_n * (safe_n - 1)
@@ -2088,7 +2087,7 @@ def bootstrap_ci(  # noqa: C901
     q_val = float(np.mean(valid_alphas < alternative_threshold)) if alternative_threshold is not None else None
 
     return BootstrapResult(
-        alpha=observed_alpha,
+        alpha=float(observed_alpha),
         confidence_interval=(ci_low, ci_high),
         standard_error=se,
         q_value=q_val,
