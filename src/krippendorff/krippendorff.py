@@ -1655,10 +1655,10 @@ def _compute_bca_interval(
     valid_alphas: npt.NDArray[np.floating],
     observed_alpha: float,
     confidence_level: float,
-    num_u: npt.NDArray,
+    num_u: npt.NDArray | None,
     den_u: npt.NDArray,
     nv_matrix: npt.NDArray,
-    d: npt.NDArray,
+    d: npt.NDArray | None,
     de_fixed: float | None,
     fallback_pct: tuple[float, float],
     domain: npt.NDArray | None = None,
@@ -1669,7 +1669,7 @@ def _compute_bca_interval(
     is_marginal_dependent: bool = False,
 ) -> tuple[float, float]:
     """Compute Bias-Corrected and Accelerated (BCa) bootstrap confidence interval."""
-    n_units = len(num_u)
+    n_units = len(den_u)
     if n_units < 3 or len(valid_alphas) < 3:
         warnings.warn(
             "BCa bootstrap interval requires at least 3 units and 3 valid replicates; "
@@ -1718,11 +1718,13 @@ def _compute_bca_interval(
             dou = (ou * du).sum() / nu
             alpha_jack[u] = 1.0 - dou / deu
     elif de_fixed is not None:
+        assert num_u is not None
         total_num = float(np.sum(num_u))
         num_j = total_num - num_u
         do_j = np.where(valid_j, num_j / safe_nj, np.nan)
         alpha_jack = np.where(valid_j, 1.0 - do_j / de_fixed, np.nan)
     else:
+        assert num_u is not None and d is not None
         total_num = float(np.sum(num_u))
         num_j = total_num - num_u
         total_nv = np.sum(nv_matrix, axis=0)
@@ -1928,20 +1930,6 @@ def bootstrap_ci(  # noqa: C901
     de_fixed = float(obs_res.d_e) if has_ref else None
 
     distance_metric = _distance_metric(level_of_measurement)
-    o = _coincidences(counts, dtype=dtype_dt)
-    n_v = o.sum(axis=0)
-
-    _, dist_n_v, _ = _compute_expected_coincidences(
-        value_domain=domain,
-        n_v=n_v,
-        dtype=dtype_dt,
-        all_rel_arr=all_rel_arr,
-        all_value_counts=all_value_counts,
-        random_coincidences=random_coincidences,
-    )
-    d = _distances(domain, distance_metric, dist_n_v, dtype=dtype_dt)
-
-    is_marginal_dep = de_fixed is None and _is_metric_marginal_dependent(level_of_measurement)
 
     n_units, v_domain_len = counts.shape
     pairable = counts.sum(axis=1)
@@ -1951,8 +1939,24 @@ def bootstrap_ci(  # noqa: C901
     den_u = np.where(valid_units, pairable, 0.0)
     nv_matrix = np.where(valid_units[:, np.newaxis], counts, 0.0)
 
-    wd = weights @ d.T
-    num_u = np.sum(counts * wd, axis=1) - np.sum(weights * np.diag(d), axis=1)
+    is_marginal_dep = de_fixed is None and _is_metric_marginal_dependent(level_of_measurement)
+
+    if not is_marginal_dep:
+        n_v = counts[valid_units].sum(axis=0, dtype=dtype_dt)
+        _, dist_n_v, _ = _compute_expected_coincidences(
+            value_domain=domain,
+            n_v=n_v,
+            dtype=dtype_dt,
+            all_rel_arr=all_rel_arr,
+            all_value_counts=all_value_counts,
+            random_coincidences=random_coincidences,
+        )
+        d: npt.NDArray | None = _distances(domain, distance_metric, dist_n_v, dtype=dtype_dt)
+        wd = weights @ d.T
+        num_u: npt.NDArray | None = np.sum(counts * wd, axis=1) - np.sum(weights * np.diag(d), axis=1)
+    else:
+        d = None
+        num_u = None
 
     rng = _get_rng(random_state)
     p_units = [1.0 / n_units] * n_units
@@ -2001,6 +2005,7 @@ def bootstrap_ci(  # noqa: C901
                 dob = (o_b * d_b).sum() / nb
                 alpha_star[start + i] = 1.0 - dob / deb
         else:
+            assert num_u is not None
             num_star = w_batch @ num_u
             n_star = w_batch @ den_u
             nv_star = w_batch @ nv_matrix
@@ -2012,6 +2017,7 @@ def bootstrap_ci(  # noqa: C901
             if de_fixed is not None:
                 de_star = np.full(b_count, de_fixed, dtype=float)
             else:
+                assert d is not None
                 quad = np.sum((nv_star @ d) * nv_star, axis=1)
                 diag_term = nv_star @ np.diag(d)
                 de_denom = safe_n * (safe_n - 1)
