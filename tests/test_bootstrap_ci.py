@@ -672,6 +672,90 @@ def test_bootstrap_ci_dtype(nominal_data: list[list[float]]) -> None:
     assert res64.resamples.dtype == np.float64
 
 
+def test_bootstrap_ci_stackoverflow_krippendorff_c_data() -> None:
+    # "C data" from Krippendorff (2004) as used in R irr package and SO #32952366
+    raw = [
+        1,
+        1,
+        np.nan,
+        1,
+        2,
+        2,
+        3,
+        2,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        2,
+        2,
+        2,
+        2,
+        1,
+        2,
+        3,
+        4,
+        4,
+        4,
+        4,
+        4,
+        1,
+        1,
+        2,
+        1,
+        2,
+        2,
+        2,
+        2,
+        np.nan,
+        5,
+        5,
+        5,
+        np.nan,
+        np.nan,
+        1,
+        1,
+        np.nan,
+        np.nan,
+        3,
+        np.nan,
+    ]
+    nmm = np.array(raw).reshape(12, 4).T
+
+    # 1. Verify point estimate matches R's irr::kripp.alpha(nmm, "ordinal") -> 0.8153875...
+    point = alpha(nmm, level_of_measurement="ordinal")
+    assert np.isclose(point, 0.8153875037548813)
+
+    # 2. Verify bootstrap percentile interval with 1000 resamples reproduces the ~[0.43, 1.00] interval
+    res = bootstrap_ci(
+        nmm,
+        level_of_measurement="ordinal",
+        n_resamples=1000,
+        method="percentile",
+        random_state=42,
+    )
+    assert np.isclose(res.alpha, point)
+    assert 0.40 <= res.ci_low <= 0.50
+    assert 0.95 <= res.ci_high <= 1.0
+    assert np.isclose(res.ci_low, 0.44769685895543765)
+    assert np.isclose(res.ci_high, 0.9987376598155041)
+
+    # 3. Verify BCa interval is also well-behaved on this dataset
+    res_bca = bootstrap_ci(
+        nmm,
+        level_of_measurement="ordinal",
+        n_resamples=1000,
+        method="bca",
+        random_state=42,
+    )
+    assert np.isclose(res_bca.alpha, point)
+    assert res_bca.ci_low < res_bca.alpha < res_bca.ci_high
+
+
 def test_package_exports() -> None:
     assert hasattr(krippendorff, "bootstrap_ci")
     assert hasattr(krippendorff, "BootstrapResult")
