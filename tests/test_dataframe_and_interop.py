@@ -1263,3 +1263,61 @@ def test_sentinel_supports_none_valued_column_labels() -> None:
 
     with pytest.raises(ValueError, match="All three of coder_col, unit_col, and value_col must be specified together"):
         alpha(table, coder_col=None, unit_col="unit")
+
+
+class MockDataFrameWithILoc:
+    """Mock DataFrame implementing .iloc column indexing."""
+
+    def __init__(self, data: dict[str, list[Any]]) -> None:
+        self.columns = list(data.keys())
+        self._data = data
+        self.shape = (len(next(iter(data.values()))), len(data.keys())) if data else (0, 0)
+
+        class _ILoc:
+            def __init__(self, parent: MockDataFrameWithILoc) -> None:
+                self.parent = parent
+
+            def __getitem__(self, item: Any) -> list[Any]:
+                col_idx = item[1]
+                col_name = self.parent.columns[col_idx]
+                return self.parent._data[col_name]
+
+        self.iloc = _ILoc(self)
+
+
+class MockDataFrameFaultyExtraction:
+    """Mock DataFrame whose column indexing raises an exception, falling back to to_numpy()."""
+
+    def __init__(self, data: dict[str, list[Any]]) -> None:
+        self.columns = list(data.keys())
+        self._data = data
+
+    def __getitem__(self, key: str) -> Any:
+        raise RuntimeError("Indexing failed")
+
+    def to_numpy(self) -> np.ndarray:
+        return np.array([self._data[k] for k in self.columns]).T
+
+
+def test_to_numpy_array_dataframe_edge_cases() -> None:
+    # Test DataFrame with .iloc
+    df_iloc = MockDataFrameWithILoc({"u1": [1.0, 2.0], "u2": [1.0, 2.0]})
+    assert np.isclose(alpha(df_iloc, level_of_measurement="interval"), -0.5)
+
+    # Test empty DataFrame with 0 columns
+    class MockDataFrameEmpty:
+        def __init__(self) -> None:
+            self.columns: list[str] = []
+
+    with pytest.raises(ValueError, match="reliability_data must be a 2D array"):
+        alpha(MockDataFrameEmpty())
+
+    # Test fallback to to_numpy when column extraction raises
+    df_faulty = MockDataFrameFaultyExtraction({"u1": [1.0, 2.0], "u2": [1.0, 2.0]})
+    assert np.isclose(alpha(df_faulty, level_of_measurement="interval"), -0.5)
+
+    # Test all_reliability_data object array
+    all_obj = np.array([["1", "2"], ["1", "2"]], dtype=object)
+    assert np.isclose(
+        alpha([["1", "2"], ["1", "2"]], all_reliability_data=all_obj, level_of_measurement="nominal"), 1.0
+    )
