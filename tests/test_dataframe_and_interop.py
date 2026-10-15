@@ -261,13 +261,26 @@ def test_dataframe_wide_coders_axis() -> None:
 
 
 def test_dict_of_columns_as_wide_data() -> None:
-    # A mapping of coder names to sequences of unit ratings
+    # A mapping of coder names to sequences of unit ratings (columns are coders)
     col_dict = {
         "coder1": [1.0, 2.0, 3.0],
         "coder2": [1.0, 2.0, 4.0],
     }
     expected_alpha = alpha([[1.0, 2.0, 3.0], [1.0, 2.0, 4.0]], level_of_measurement="interval")
-    assert np.isclose(alpha(col_dict, coders_axis="rows", level_of_measurement="interval"), expected_alpha)
+    df = MockDataFrame(col_dict)
+
+    res_dict = alpha(col_dict, coders_axis="columns", level_of_measurement="interval")
+    res_df = alpha(df, coders_axis="columns", level_of_measurement="interval")
+    assert np.isclose(res_dict, expected_alpha)
+    assert np.isclose(res_df, expected_alpha)
+
+    # bootstrap_ci equivalence between mapping and DataFrame
+    res_ci_dict = bootstrap_ci(col_dict, coders_axis="columns", level_of_measurement="interval", random_state=42)
+    res_ci_df = bootstrap_ci(df, coders_axis="columns", level_of_measurement="interval", random_state=42)
+    assert np.isclose(res_ci_dict.alpha, expected_alpha)
+    assert np.isclose(res_ci_dict.alpha, res_ci_df.alpha)
+    assert np.isclose(res_ci_dict.confidence_interval[0], res_ci_df.confidence_interval[0])
+    assert np.isclose(res_ci_dict.confidence_interval[1], res_ci_df.confidence_interval[1])
 
 
 def test_coders_axis_subsample_all_reliability_data() -> None:
@@ -880,3 +893,22 @@ def test_preserve_exact_integer_labels_in_object_array() -> None:
     data_str_obj = np.array([["a", None, "b"], ["a", "b", "b"]], dtype=object)
     res_str_obj = alpha(data_str_obj, level_of_measurement="nominal")
     assert np.isclose(res_str_obj, 1.0)
+
+
+def test_preserve_missing_sentinels_with_string_nan_category() -> None:
+    # Copilot review finding:
+    # The string "nan" can be a valid category label (e.g. "not applicable" or literal "nan").
+    # Missing values (None/NaN) must not be converted to the string "nan" and merged with that category.
+    # For matrix [["nan", "yes", None], ["nan", "no", "no"]] with domain ["nan", "yes", "no"]:
+    # Unit 0: coders agree on "nan" (2 ratings)
+    # Unit 1: "yes" vs "no" (2 ratings)
+    # Unit 2: coder 0 is missing, coder 1 is "no" (1 rating, not pairable)
+    # Expected alpha is 0.4 (if None was converted to string "nan", alpha would be 1/11).
+    data = np.array([["nan", "yes", None], ["nan", "no", "no"]], dtype=object)
+    domain = ["nan", "yes", "no"]
+
+    res_alpha = alpha(data, value_domain=domain, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 0.4)
+
+    res_ci = bootstrap_ci(data, value_domain=domain, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 0.4)

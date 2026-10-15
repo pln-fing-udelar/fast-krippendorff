@@ -1023,7 +1023,7 @@ def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:
         and len(data) > 0
         and all(isinstance(v, (list, tuple, np.ndarray)) or hasattr(v, "__iter__") for v in data.values())
     ):
-        data = np.asarray(list(data.values()))
+        data = np.asarray(list(data.values())).T
     else:
         data = np.asarray(data)
     return np.asarray(data, dtype=dtype) if dtype is not None else np.asarray(data)
@@ -1077,13 +1077,12 @@ def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:  # noqa: C901
                     pass
             return out
         elif all(isinstance(v, str) for v in non_nan):
-            str_out = np.empty(arr.shape, dtype=object)
-            for idx, val in np.ndenumerate(out):
-                str_out[idx] = "nan" if (isinstance(val, float) and np.isnan(val)) else str(val)
-            try:
-                return str_out.astype(str)
-            except Exception:
-                pass
+            if not any(isinstance(v, float) and np.isnan(v) for v in out.flat):
+                try:
+                    return out.astype(str)
+                except Exception:
+                    pass
+            return out
     return out
 
 
