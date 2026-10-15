@@ -1049,9 +1049,9 @@ _DEFAULT_COL: Any = object()
 
 def _is_homogeneous_native_numeric_df(data: Any) -> bool:
     """Check if DataFrame has exclusively native numpy float, integer, or boolean columns."""
-    if not hasattr(data, "dtypes"):
-        return False
     try:
+        if not hasattr(data, "dtypes"):
+            return False
         dtypes_list = list(data.dtypes)
         if not dtypes_list:
             return False
@@ -1078,14 +1078,9 @@ def _normalize_scalar(val: Any) -> Any:
     if isinstance(val, (int, np.integer)):
         return int(val)
     if isinstance(val, (float, np.floating)):
-        if np.isnan(val):
-            return np.nan
-        try:
-            if hasattr(val, "is_integer") and val.is_integer():
-                return int(val)
-            return val
-        except (OverflowError, ValueError):
-            return val
+        if hasattr(val, "is_integer") and val.is_integer():
+            return int(val)
+        return val
     return val
 
 
@@ -1144,16 +1139,10 @@ def _can_safely_cast_to_float(vals: Sequence[Any]) -> bool:
     """Check if all numeric values can be converted to float without losing precision or distinctness."""
     for v in vals:
         if isinstance(v, (int, np.integer)) and not isinstance(v, bool):
-            try:
-                if abs(v) >= (1 << 53) or int(float(v)) != v:
-                    return False
-            except (OverflowError, ValueError):
+            if abs(v) >= (1 << 53) or int(float(v)) != v:
                 return False
         elif isinstance(v, (float, np.floating)):
-            try:
-                if not np.isnan(v) and float(v) != v:
-                    return False
-            except (OverflowError, ValueError):
+            if not np.isnan(v) and float(v) != v:
                 return False
     return True
 
@@ -1175,30 +1164,18 @@ def _clean_object_array(arr: npt.NDArray, extra_vals: Sequence[Any] | None = Non
             # can be safely represented without loss of precision or float promotion collisions (e.g. abs(v) < 2**53).
             if _can_safely_cast_to_float(vals_to_check):
                 if not any(isinstance(v, float) and np.isnan(v) for v in out.flat):
-                    try:
-                        int_arr = out.astype(int)
-                        if all(int_arr[idx] == out[idx] for idx, _ in np.ndenumerate(out)):
-                            return int_arr
-                    except Exception:
-                        pass
-                try:
-                    return out.astype(float)
-                except Exception:
-                    pass
+                    int_arr = out.astype(int)
+                    if all(int_arr[idx] == out[idx] for idx, _ in np.ndenumerate(out)):
+                        return int_arr
+                return out.astype(float)
             return out
         elif all(_is_numeric_scalar(v) for v in non_nan):
             if _can_safely_cast_to_float(vals_to_check):
-                try:
-                    return out.astype(float)
-                except Exception:
-                    pass
+                return out.astype(float)
             return out
         elif all(isinstance(v, bool) for v in non_nan):
             if not any(isinstance(v, float) and np.isnan(v) for v in out.flat):
-                try:
-                    return out.astype(bool)
-                except Exception:
-                    pass
+                return out.astype(bool)
             return out
         elif all(isinstance(v, str) for v in non_nan):
             # Retain object array for strings to avoid fixed-width Unicode memory blowup
@@ -1213,7 +1190,7 @@ def _is_numeric_scalar(val: Any) -> bool:
 
 def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
     """Convert domain values to a 1-D ndarray, preserving object dtype for heterogeneous types."""
-    if isinstance(domain_values, np.ndarray):
+    if isinstance(domain_values, np.ndarray) and domain_values.dtype != object:
         return domain_values
     domain_list = (
         list(domain_values)
@@ -1221,7 +1198,7 @@ def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
         else list(np.asarray(domain_values))
     )
     if all(isinstance(v, (float, np.floating)) for v in domain_list):
-        return np.asarray(domain_values)
+        return np.asarray(domain_list)
     domain_list = [_normalize_scalar(v) for v in domain_list]
     if all(isinstance(v, bool) for v in domain_list):
         return np.asarray(domain_list, dtype=bool)
@@ -1230,30 +1207,23 @@ def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
     if all(isinstance(v, bytes) for v in domain_list):
         return np.asarray(domain_values)
     if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in domain_list):
-        try:
-            as_arr = np.asarray(domain_list)
-            if np.issubdtype(as_arr.dtype, np.integer):
-                return as_arr
-        except Exception:
-            pass
+        as_arr = np.asarray(domain_list)
+        if np.issubdtype(as_arr.dtype, np.integer):
+            return as_arr
         arr = np.empty(len(domain_list), dtype=object)
         for i, v in enumerate(domain_list):
             arr[i] = v
         return arr
-    if all(isinstance(v, (float, np.floating)) for v in domain_list):
-        return np.asarray(domain_values)
     if all(_is_numeric_scalar(v) for v in domain_list):
-        try:
-            as_arr = np.asarray(domain_list)
-            if (
-                as_arr.ndim == 1
-                and len(as_arr) == len(domain_list)
-                and len(set(as_arr.tolist())) == len(set(domain_list))
-                and all(v == arr_v.item() for v, arr_v in zip(domain_list, as_arr, strict=True))
-            ):
-                return as_arr
-        except Exception:
-            pass
+        as_arr = np.asarray(domain_list)
+        if (
+            as_arr.dtype != object
+            and as_arr.ndim == 1
+            and len(as_arr) == len(domain_list)
+            and len(set(as_arr.tolist())) == len(set(domain_list))
+            and all(v == arr_v.item() for v, arr_v in zip(domain_list, as_arr, strict=True))
+        ):
+            return as_arr
     arr = np.empty(len(domain_list), dtype=object)
     for i, v in enumerate(domain_list):
         arr[i] = v
@@ -1358,10 +1328,7 @@ def _dict_reliability_data_to_value_counts(
         for u, v in d.items():
             if not _is_missing(v):
                 norm_v = _normalize_scalar(v)
-                idx = val_to_idx.get(norm_v)
-                if idx is None:
-                    raise ValueError("The reliability data contains out-of-domain values.")
-                value_counts[unit_to_idx[u], idx] += 1
+                value_counts[unit_to_idx[u], val_to_idx[norm_v]] += 1
 
     return value_counts, domain_arr
 
@@ -1405,10 +1372,16 @@ def _extract_table_columns(
                     cols_cache[col] = list(table[col])
             except TypeError:
                 pass
-        c_list = list(cols_cache[coder_col]) if coder_col in cols_cache else list(table[coder_col])
-        u_list = list(cols_cache[unit_col]) if unit_col in cols_cache else list(table[unit_col])
-        v_list = list(cols_cache[value_col]) if value_col in cols_cache else list(table[value_col])
-        return c_list, u_list, v_list
+
+        def _get_col(col: Any) -> list[Any]:
+            try:
+                if col in cols_cache:
+                    return list(cols_cache[col])
+            except TypeError:
+                pass
+            return list(table[col])
+
+        return _get_col(coder_col), _get_col(unit_col), _get_col(value_col)
     c_list: list[Any] = []
     u_list: list[Any] = []
     v_list: list[Any] = []

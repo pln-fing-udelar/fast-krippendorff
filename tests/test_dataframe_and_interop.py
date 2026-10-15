@@ -1530,3 +1530,106 @@ def test_preserve_input_precision_interval_and_ratio_metrics() -> None:
 
         res_ratio_ld = alpha(ratings_ld, level_of_measurement="ratio", dtype=np.float64)
         assert np.isclose(res_ratio_ld, 1.0)
+
+
+def test_object_array_domains_pass_through_normalization() -> None:
+    # Copilot review finding (discussion_r4279546520):
+    # With B = 2**53, object ratings [[0, B, B+1], [0, B+1, B]] and
+    # value_domain=np.array([0, np.float64(B), B+1], dtype=object)
+    # Both alpha() and bootstrap_ci point estimate should return 1/6, not 1.0.
+    b = 2**53
+    ratings = [[0, b, b + 1], [0, b + 1, b]]
+    domain = np.array([0, np.float64(b), b + 1], dtype=object)
+
+    res_alpha = alpha(ratings, value_domain=domain, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0 / 6.0)
+
+    res_ci = bootstrap_ci(ratings, value_domain=domain, level_of_measurement="nominal", n_resamples=5, random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0 / 6.0)
+
+
+def test_coverage_edge_cases() -> None:
+    # 1. _is_homogeneous_native_numeric_df with 0 columns or faulty dtypes
+    class EmptyDF:
+        def __init__(self) -> None:
+            self.dtypes: list[Any] = []
+
+    assert not krippendorff.krippendorff._is_homogeneous_native_numeric_df(EmptyDF())
+
+    class FaultyDtypesDF:
+        @property
+        def dtypes(self) -> Any:
+            raise RuntimeError("Faulty dtypes")
+
+    assert not krippendorff.krippendorff._is_homogeneous_native_numeric_df(FaultyDtypesDF())
+
+    # 2. _to_numpy_array with dataframe having .dtypes and non-callable .values (no .to_numpy)
+    class ValuesOnlyDF:
+        def __init__(self) -> None:
+            self.columns = ["a", "b"]
+            self.dtypes = [np.dtype("float64"), np.dtype("float64")]
+            self.values = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    arr_values = krippendorff.krippendorff._to_numpy_array(ValuesOnlyDF())
+    np.testing.assert_array_equal(arr_values, np.array([[1.0, 2.0], [3.0, 4.0]]))
+
+    # 3. _to_numpy_array with .columns but neither .iloc nor __getitem__, and with 0 columns with __getitem__
+    class NoItemAccessDF:
+        def __init__(self) -> None:
+            self.columns = ["a"]
+
+    arr_no_item = krippendorff.krippendorff._to_numpy_array(NoItemAccessDF())
+    assert isinstance(arr_no_item, np.ndarray)
+
+    class MockDataFrameEmptyWithGetItem:
+        def __init__(self) -> None:
+            self.columns: list[str] = []
+
+        def __getitem__(self, key: str) -> Any:
+            raise KeyError(key)
+
+    arr_empty = krippendorff.krippendorff._to_numpy_array(MockDataFrameEmptyWithGetItem())
+    assert arr_empty.shape == (0, 0)
+
+    # 4. _clean_object_array with non-object ndarray, nan in int object array, and pure bool object array
+    non_obj = np.array([1, 2, 3])
+    assert krippendorff.krippendorff._clean_object_array(non_obj) is non_obj
+
+    int_with_nan = krippendorff.krippendorff._clean_object_array(np.array([1, 2, np.nan], dtype=object))
+    assert int_with_nan.dtype == float
+
+    mixed_int_float = krippendorff.krippendorff._clean_object_array(np.array([1, 2.5], dtype=object))
+    assert mixed_int_float.dtype == float
+
+    bool_obj = krippendorff.krippendorff._clean_object_array(np.array([True, False], dtype=object))
+    assert bool_obj.dtype == bool
+
+    bool_with_nan = krippendorff.krippendorff._clean_object_array(np.array([True, False, np.nan], dtype=object))
+    assert bool_with_nan.dtype == object
+
+    # 5. _to_domain_array with pure bools, huge ints, and mixed huge ints
+    dom_bool = krippendorff.krippendorff._to_domain_array([True, False])
+    assert dom_bool.dtype == bool
+
+    dom_huge_int = krippendorff.krippendorff._to_domain_array([2**65, 2**65 + 1])
+    assert dom_huge_int.dtype == object
+
+    dom_mixed = krippendorff.krippendorff._to_domain_array([1.5, 2**65])
+    assert dom_mixed.dtype == object
+
+    # 6. Dict reliability data with booleans and non-nominal measurement raises
+    with pytest.raises(
+        ValueError, match="ordered value_domain is required for level_of_measurement other than 'nominal'"
+    ):
+        alpha({0: {0: True, 1: False}, 1: {0: True, 1: False}}, level_of_measurement="interval")
+
+    # 7. Unhashable column selector in table with column accessibility
+    class TableWithUnhashableCols:
+        def __init__(self) -> None:
+            self.columns = [["c"], ["u"], ["v"]]
+
+        def __getitem__(self, key: Any) -> list[int]:
+            return [1, 2]
+
+    c, u, v = krippendorff.krippendorff._extract_table_columns(TableWithUnhashableCols(), ["c"], ["u"], ["v"])
+    assert c == [1, 2] and u == [1, 2] and v == [1, 2]
