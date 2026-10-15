@@ -865,9 +865,18 @@ def test_preserve_exact_integer_labels_in_object_array() -> None:
     res_ci_none = bootstrap_ci(data_with_none, level_of_measurement="nominal", random_state=42)
     assert np.isclose(res_alpha_none, res_ci_none.alpha)
 
-    # Arbitrarily large integers (> 2**64)
+    # Arbitrarily large integers (> 2**64 and > 2**1024 float overflow)
     data_huge = np.array([[0, 2**100, 2**100 + 1], [0, 2**100 + 1, 2**100]], dtype=object)
     res_alpha_huge = alpha(data_huge, level_of_measurement="nominal")
     assert np.isclose(res_alpha_huge, 1.0 / 6.0)
     res_ci_huge = bootstrap_ci(data_huge, level_of_measurement="nominal", random_state=42)
     assert np.isclose(res_ci_huge.alpha, 1.0 / 6.0)
+
+    data_overflow = np.array([[0, 2**2000, 2**2000 + 1], [0, 2**2000 + 1, 2**2000]], dtype=object)
+    res_alpha_overflow = alpha(data_overflow, level_of_measurement="nominal")
+    assert np.isclose(res_alpha_overflow, 1.0 / 6.0)
+
+    # Object array with strings and None
+    data_str_obj = np.array([["a", None, "b"], ["a", "b", "b"]], dtype=object)
+    res_str_obj = alpha(data_str_obj, level_of_measurement="nominal")
+    assert np.isclose(res_str_obj, 1.0)
