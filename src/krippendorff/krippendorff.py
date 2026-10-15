@@ -1376,11 +1376,11 @@ def table_to_value_counts(  # noqa: C901
 
 def _prepare_data_and_domain(  # noqa: C901
     reliability_data: Any = None,
-    value_counts: npt.ArrayLike | None = None,
+    value_counts: Any = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",
     all_reliability_data: Any = None,
-    all_value_counts: npt.ArrayLike | None = None,
+    all_value_counts: Any = None,
     random_coincidences: npt.ArrayLike | None = None,
     coders_axis: CodersAxis = "rows",
     coder_col: Any = None,
@@ -1539,6 +1539,8 @@ def _prepare_data_and_domain(  # noqa: C901
             res_counts = _reliability_data_to_value_counts(rel_arr, res_domain)
     else:
         res_counts = _to_numpy_array(value_counts)
+        if res_counts.dtype == object:
+            res_counts = _clean_object_array(res_counts)
         if res_counts.ndim != 2:
             raise ValueError("The value_counts must be a 2D array.")
 
@@ -1564,7 +1566,7 @@ def _compute_expected_coincidences(  # noqa: C901
     n_v: npt.NDArray,
     dtype: np.dtype,
     all_rel_arr: npt.NDArray | None,
-    all_value_counts: npt.ArrayLike | None,
+    all_value_counts: Any,
     random_coincidences: npt.ArrayLike | None,
 ) -> tuple[npt.NDArray, npt.NDArray, bool]:
     """Compute expected coincidence matrix e, marginal counts for distances dist_n_v, and reference flag."""
@@ -1583,6 +1585,8 @@ def _compute_expected_coincidences(  # noqa: C901
         return e, all_n_v, True
     elif all_value_counts is not None:
         all_counts = _to_numpy_array(all_value_counts)
+        if all_counts.dtype == object:
+            all_counts = _clean_object_array(all_counts)
         if all_counts.ndim != 2:
             raise ValueError("The all_value_counts must be a 2D array.")
         if all_counts.shape[1] != len(value_domain):
@@ -1624,7 +1628,7 @@ def _compute_expected_coincidences(  # noqa: C901
 @overload
 def alpha(
     reliability_data: Any = ...,
-    value_counts: npt.ArrayLike | None = ...,
+    value_counts: Any = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
     dtype: type[float] | np.dtype[np.floating] = ...,
@@ -1634,7 +1638,7 @@ def alpha(
     unit_col: Any = ...,
     value_col: Any = ...,
     all_reliability_data: Any = ...,
-    all_value_counts: npt.ArrayLike | None = ...,
+    all_value_counts: Any = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: Literal[False] = ...,
 ) -> float: ...
@@ -1643,7 +1647,7 @@ def alpha(
 @overload
 def alpha(
     reliability_data: Any = ...,
-    value_counts: npt.ArrayLike | None = ...,
+    value_counts: Any = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
     dtype: npt.DTypeLike = ...,
@@ -1653,7 +1657,7 @@ def alpha(
     unit_col: Any = ...,
     value_col: Any = ...,
     all_reliability_data: Any = ...,
-    all_value_counts: npt.ArrayLike | None = ...,
+    all_value_counts: Any = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: Literal[False] = ...,
 ) -> float | complex | np.inexact: ...
@@ -1662,7 +1666,7 @@ def alpha(
 @overload
 def alpha(
     reliability_data: Any = ...,
-    value_counts: npt.ArrayLike | None = ...,
+    value_counts: Any = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
     dtype: npt.DTypeLike = ...,
@@ -1672,7 +1676,7 @@ def alpha(
     unit_col: Any = ...,
     value_col: Any = ...,
     all_reliability_data: Any = ...,
-    all_value_counts: npt.ArrayLike | None = ...,
+    all_value_counts: Any = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: Literal[True],
 ) -> AlphaResult[Any]: ...
@@ -1681,7 +1685,7 @@ def alpha(
 @overload
 def alpha(
     reliability_data: Any = ...,
-    value_counts: npt.ArrayLike | None = ...,
+    value_counts: Any = ...,
     value_domain: npt.ArrayLike | None = ...,
     level_of_measurement: LevelOfMeasurement = ...,
     dtype: npt.DTypeLike = ...,
@@ -1691,7 +1695,7 @@ def alpha(
     unit_col: Any = ...,
     value_col: Any = ...,
     all_reliability_data: Any = ...,
-    all_value_counts: npt.ArrayLike | None = ...,
+    all_value_counts: Any = ...,
     random_coincidences: npt.ArrayLike | None = ...,
     return_components: bool,
 ) -> float | complex | np.inexact | AlphaResult[Any]: ...
@@ -1699,7 +1703,7 @@ def alpha(
 
 def alpha(
     reliability_data: Any = None,
-    value_counts: npt.ArrayLike | None = None,
+    value_counts: Any = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",
     dtype: npt.DTypeLike = DEFAULT_DTYPE,
@@ -1709,7 +1713,7 @@ def alpha(
     unit_col: Any = None,
     value_col: Any = None,
     all_reliability_data: Any = None,
-    all_value_counts: npt.ArrayLike | None = None,
+    all_value_counts: Any = None,
     random_coincidences: npt.ArrayLike | None = None,
     return_components: bool = False,
 ) -> Any:
@@ -1911,8 +1915,8 @@ def alpha_table(
     dtype: npt.DTypeLike = DEFAULT_DTYPE,
     *,
     value_domain: npt.ArrayLike | None = None,
-    all_reliability_data: npt.ArrayLike | None = None,
-    all_value_counts: npt.ArrayLike | None = None,
+    all_reliability_data: Any = None,
+    all_value_counts: Any = None,
     random_coincidences: npt.ArrayLike | None = None,
     return_components: bool = False,
 ) -> Any:
@@ -2203,7 +2207,7 @@ def _compute_bca_interval(
 
 def bootstrap_ci(  # noqa: C901
     reliability_data: Any = None,
-    value_counts: npt.ArrayLike | None = None,
+    value_counts: Any = None,
     value_domain: npt.ArrayLike | None = None,
     level_of_measurement: LevelOfMeasurement = "interval",
     dtype: npt.DTypeLike = DEFAULT_DTYPE,
@@ -2214,7 +2218,7 @@ def bootstrap_ci(  # noqa: C901
     method: Literal["percentile", "bca", "basic", "normal"] = "percentile",
     random_state: int | np.random.Generator | np.random.RandomState | None = None,
     all_reliability_data: Any = None,
-    all_value_counts: npt.ArrayLike | None = None,
+    all_value_counts: Any = None,
     random_coincidences: npt.ArrayLike | None = None,
     return_distribution: bool = False,
     coders_axis: CodersAxis = "rows",
@@ -2532,8 +2536,8 @@ def bootstrap_ci_table(
     confidence_level: float = 0.95,
     method: Literal["percentile", "bca", "basic", "normal"] = "percentile",
     alternative_threshold: float | None = None,
-    all_reliability_data: npt.ArrayLike | None = None,
-    all_value_counts: npt.ArrayLike | None = None,
+    all_reliability_data: Any = None,
+    all_value_counts: Any = None,
     random_state: int | np.random.Generator | np.random.RandomState | None = None,
     random_coincidences: npt.ArrayLike | None = None,
     return_distribution: bool = False,

@@ -1115,3 +1115,41 @@ def test_string_object_array_retains_object_dtype_avoiding_unicode_blowup() -> N
 
     res_ci = bootstrap_ci(ratings, level_of_measurement="nominal", random_state=42)
     assert np.isclose(res_ci.alpha, 1.0)
+
+
+def test_object_arrays_normalized_in_count_input_paths() -> None:
+    # Copilot review finding (discussion_r4278950260):
+    # Numeric column mappings such as {"a": [2, 0], "b": [0, 2]} and object-backed DataFrames
+    # become object arrays in _to_numpy_array, but must be normalized by _clean_object_array
+    # in both value_counts and all_value_counts count-input paths.
+    vc_dict = {"a": [2, 0], "b": [0, 2]}
+    res_a = alpha(value_counts=vc_dict, level_of_measurement="nominal")
+    assert np.isclose(res_a, 1.0)
+
+    res_ci = bootstrap_ci(value_counts=vc_dict, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0)
+
+    # Reference all_value_counts as column mapping
+    sample = [[0, 1], [0, 1]]
+    all_vc_dict = {"a": [2, 0], "b": [0, 2]}
+    res_ref_a = alpha(sample, all_value_counts=all_vc_dict, level_of_measurement="nominal")
+    assert np.isclose(res_ref_a, 1.0)
+
+    res_ref_ci = bootstrap_ci(sample, all_value_counts=all_vc_dict, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ref_ci.alpha, 1.0)
+
+    # Mock object-backed DataFrame for direct and reference counts
+    class MockObjCountsDF:
+        def __init__(self, arr: list[list[int]]) -> None:
+            self._arr = np.asarray(arr, dtype=object)
+
+        def to_numpy(self) -> np.ndarray:
+            return self._arr
+
+    df_vc = MockObjCountsDF([[2, 0], [0, 2]])
+    assert np.isclose(alpha(value_counts=df_vc, level_of_measurement="nominal"), 1.0)
+    assert np.isclose(bootstrap_ci(value_counts=df_vc, level_of_measurement="nominal", random_state=42).alpha, 1.0)
+    assert np.isclose(alpha(sample, all_value_counts=df_vc, level_of_measurement="nominal"), 1.0)
+    assert np.isclose(
+        bootstrap_ci(sample, all_value_counts=df_vc, level_of_measurement="nominal", random_state=42).alpha, 1.0
+    )
