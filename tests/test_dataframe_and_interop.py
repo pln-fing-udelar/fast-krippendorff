@@ -119,6 +119,17 @@ class MockDataFrame:
         return np.array([self._data[k] for k in self.columns]).T
 
     @property
+    def dtypes(self) -> list[np.dtype]:
+        res = []
+        for k in self.columns:
+            types = {type(x) for x in self._data[k]}
+            if len(types) > 1:
+                res.append(np.dtype("O"))
+            else:
+                res.append(np.array(self._data[k]).dtype)
+        return res
+
+    @property
     def values(self) -> np.ndarray:
         return self.to_numpy()
 
@@ -1321,3 +1332,106 @@ def test_to_numpy_array_dataframe_edge_cases() -> None:
     assert np.isclose(
         alpha([["1", "2"], ["1", "2"]], all_reliability_data=all_obj, level_of_measurement="nominal"), 1.0
     )
+
+
+def test_normalize_integral_scalars_prevents_duplicate_label_counting() -> None:
+    # b = 2**53 = 9007199254740992, where np.float64(b) compares equal to both b and b + 1
+    # without integer scalar normalization.
+    b = 2**53
+    ratings = np.array([[0, np.float64(b), b + 1], [0, b + 1, np.float64(b)]], dtype=object)
+
+    # Value counts should count each label exactly once per coder/unit
+    domain = np.array([0, b, b + 1])
+    counts = krippendorff.krippendorff._reliability_data_to_value_counts(ratings, domain)
+    np.testing.assert_array_equal(counts, np.array([[2, 0, 0], [0, 1, 1], [0, 1, 1]]))
+
+    # Nominal alpha should be exactly 1/6 (~0.166667), not 0.3
+    res_alpha = alpha(ratings, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0 / 6.0)
+
+    # bootstrap_ci should also yield nominal alpha = 1/6
+    res_ci = bootstrap_ci(ratings, level_of_measurement="nominal", n_resamples=20, random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0 / 6.0)
+
+
+def test_homogeneous_numeric_dataframe_fast_path() -> None:
+    # Homogeneous float DataFrame
+    df_float = MockDataFrame({"u1": [1.0, 2.0], "u2": [3.0, 4.0]})
+    arr_float = krippendorff.krippendorff._to_numpy_array(df_float)
+    assert np.issubdtype(arr_float.dtype, np.floating)
+    assert np.isclose(alpha(df_float, level_of_measurement="interval"), 0.7)
+
+    # Homogeneous integer DataFrame
+    df_int = MockDataFrame({"u1": [1, 2], "u2": [3, 4]})
+    arr_int = krippendorff.krippendorff._to_numpy_array(df_int)
+    assert np.issubdtype(arr_int.dtype, np.integer)
+    assert np.isclose(alpha(df_int, level_of_measurement="interval"), 0.7)
+
+    # Homogeneous boolean DataFrame
+    df_bool = MockDataFrame({"u1": [True, False], "u2": [False, True]})
+    arr_bool = krippendorff.krippendorff._to_numpy_array(df_bool)
+    assert arr_bool.dtype == bool
+    assert np.isclose(alpha(df_bool, level_of_measurement="nominal"), -0.5)
+
+
+def test_boolean_ratings_nominal_measurement() -> None:
+    # Wide dict with boolean values
+    wide_bool = {"c1": [False, True, False], "c2": [False, True, False]}
+    assert np.isclose(alpha(wide_bool, coders_axis="columns", level_of_measurement="nominal"), 1.0)
+    ci = bootstrap_ci(wide_bool, coders_axis="columns", level_of_measurement="nominal", n_resamples=10, random_state=42)
+    assert np.isclose(ci.alpha, 1.0)
+
+    # 2D boolean ndarray
+    arr_bool = np.array([[True, False, True], [True, False, True]], dtype=bool)
+    assert np.isclose(alpha(arr_bool, level_of_measurement="nominal"), 1.0)
+
+    # Boolean with non-nominal measurement without explicit value_domain must raise
+    with pytest.raises(
+        ValueError, match="ordered value_domain is required for level_of_measurement other than 'nominal'"
+    ):
+        alpha(wide_bool, coders_axis="columns", level_of_measurement="ordinal")
+
+    with pytest.raises(
+        ValueError, match="ordered value_domain is required for level_of_measurement other than 'nominal'"
+    ):
+        alpha(arr_bool, level_of_measurement="interval")
+
+
+def test_iterator_backed_columns_overlapping_selectors() -> None:
+    # When coder_col == value_col and columns are backed by iterators
+    def make_table() -> dict[str, Any]:
+        return {"coder": iter([1, 2, 1, 2]), "unit": iter(["a", "a", "b", "b"])}
+
+    # Direct table_to_value_counts
+    counts, domain = table_to_value_counts(make_table(), coder_col="coder", unit_col="unit", value_col="coder")
+    np.testing.assert_array_equal(counts, np.array([[1, 1], [1, 1]]))
+    np.testing.assert_array_equal(domain, np.array([1, 2]))
+
+    # alpha_table
+    res_alpha = alpha_table(
+        make_table(), coder_col="coder", unit_col="unit", value_col="coder", level_of_measurement="nominal"
+    )
+    assert np.isclose(res_alpha, -0.5)
+
+    # bootstrap_ci_table
+    res_ci = bootstrap_ci_table(
+        make_table(),
+        coder_col="coder",
+        unit_col="unit",
+        value_col="coder",
+        level_of_measurement="nominal",
+        n_resamples=10,
+        random_state=42,
+    )
+    assert np.isclose(res_ci.alpha, -0.5)
+
+
+def test_avoid_reference_sized_allocations_for_object_sample() -> None:
+    # A small object sample against a large numeric reference dataset
+    rng = np.random.default_rng(42)
+    large_ref = rng.choice([1, 2, 3, 4, 5], size=(2, 5000))
+    sample = np.array([["1", "2"], ["1", "2"]], dtype=object)
+
+    res = alpha(sample, all_reliability_data=large_ref, level_of_measurement="nominal")
+    assert isinstance(res, float)
+    assert not np.isnan(res)

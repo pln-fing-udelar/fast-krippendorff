@@ -966,6 +966,17 @@ def _reliability_data_to_value_counts(
         Number of coders that assigned a certain value to a determined unit, where N is the number of units
         and V is the value count.
     """
+    if reliability_data.dtype == object:
+        out_rel = np.empty(reliability_data.shape, dtype=object)
+        for idx, val in np.ndenumerate(reliability_data):
+            out_rel[idx] = _normalize_scalar(val)
+        reliability_data = out_rel
+    if value_domain.dtype == object:
+        out_dom = np.empty(value_domain.shape, dtype=object)
+        for idx, val in np.ndenumerate(value_domain):
+            out_dom[idx] = _normalize_scalar(val)
+        value_domain = out_dom
+
     rd = reliability_data.T[..., np.newaxis]
     vd = value_domain[np.newaxis, np.newaxis, :]
     if (
@@ -1015,6 +1026,48 @@ def _is_missing(val: Any) -> bool:
 _DEFAULT_COL: Any = object()
 
 
+def _is_homogeneous_native_numeric_df(data: Any) -> bool:
+    """Check if DataFrame has exclusively native numpy float, integer, or boolean columns."""
+    if not hasattr(data, "dtypes"):
+        return False
+    try:
+        dtypes_list = list(data.dtypes)
+        if not dtypes_list:
+            return False
+        # All columns are native floating
+        if all(isinstance(dt, np.dtype) and dt.kind in ("f", "c") for dt in dtypes_list):
+            return True
+        # All columns are native integer
+        if all(isinstance(dt, np.dtype) and dt.kind in ("i", "u") for dt in dtypes_list):
+            return True
+        # All columns are native boolean
+        if all(isinstance(dt, np.dtype) and dt.kind == "b" for dt in dtypes_list):
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _normalize_scalar(val: Any) -> Any:
+    """Normalize numeric and boolean scalars to standard Python types to ensure exact comparison."""
+    if _is_missing(val):
+        return np.nan
+    if isinstance(val, (bool, np.bool_)):
+        return bool(val)
+    if isinstance(val, (int, np.integer)):
+        return int(val)
+    if isinstance(val, (float, np.floating)):
+        if np.isnan(val):
+            return np.nan
+        try:
+            if hasattr(val, "is_integer") and val.is_integer():
+                return int(val)
+            return val
+        except (OverflowError, ValueError):
+            return val
+    return val
+
+
 def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:  # noqa: C901
     """Convert array-like, tensor, or dataframe to a numpy ndarray without forcing framework imports."""
     if hasattr(data, "detach") and callable(data.detach):
@@ -1022,6 +1075,13 @@ def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:  # noqa: C901
     if hasattr(data, "cpu") and callable(data.cpu):
         data = data.cpu()
     if hasattr(data, "columns") and not callable(data.columns):
+        if _is_homogeneous_native_numeric_df(data):
+            if hasattr(data, "to_numpy") and callable(data.to_numpy):
+                data = data.to_numpy()
+                return np.asarray(data, dtype=dtype) if dtype is not None else data
+            elif hasattr(data, "values") and not callable(data.values):
+                data = np.asarray(data.values)
+                return np.asarray(data, dtype=dtype) if dtype is not None else data
         try:
             if hasattr(data, "iloc"):
                 cols_data = [list(data.iloc[:, i]) for i in range(data.shape[1])]
@@ -1083,12 +1143,11 @@ def _clean_object_array(arr: npt.NDArray, extra_vals: Sequence[Any] | None = Non
         return arr
     out = np.empty(arr.shape, dtype=object)
     for idx, val in np.ndenumerate(arr):
-        if _is_missing(val):
-            out[idx] = np.nan
-        else:
-            out[idx] = val
+        out[idx] = _normalize_scalar(val)
     non_nan = [v for v in out.flat if not (isinstance(v, float) and np.isnan(v))]
-    vals_to_check = non_nan if extra_vals is None else non_nan + [v for v in extra_vals if not _is_missing(v)]
+    vals_to_check = (
+        non_nan if extra_vals is None else non_nan + [_normalize_scalar(v) for v in extra_vals if not _is_missing(v)]
+    )
     if len(non_nan) > 0:
         if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in non_nan):
             # Only downcast to integer or float if every value (including domain and reference data in vals_to_check)
@@ -1113,6 +1172,13 @@ def _clean_object_array(arr: npt.NDArray, extra_vals: Sequence[Any] | None = Non
                 except Exception:
                     pass
             return out
+        elif all(isinstance(v, bool) for v in non_nan):
+            if not any(isinstance(v, float) and np.isnan(v) for v in out.flat):
+                try:
+                    return out.astype(bool)
+                except Exception:
+                    pass
+            return out
         elif all(isinstance(v, str) for v in non_nan):
             # Retain object array for strings to avoid fixed-width Unicode memory blowup
             return out
@@ -1133,13 +1199,16 @@ def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
         if hasattr(domain_values, "__iter__") and not isinstance(domain_values, (str, bytes))
         else list(np.asarray(domain_values))
     )
+    domain_list = [_normalize_scalar(v) for v in domain_list]
+    if all(isinstance(v, bool) for v in domain_list):
+        return np.asarray(domain_list, dtype=bool)
     if all(isinstance(v, str) for v in domain_list):
         return np.asarray(domain_values)
     if all(isinstance(v, bytes) for v in domain_list):
         return np.asarray(domain_values)
     if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in domain_list):
         try:
-            as_arr = np.asarray(domain_values)
+            as_arr = np.asarray(domain_list)
             if np.issubdtype(as_arr.dtype, np.integer):
                 return as_arr
         except Exception:
@@ -1152,7 +1221,7 @@ def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
         return np.asarray(domain_values)
     if all(_is_numeric_scalar(v) for v in domain_list):
         try:
-            as_arr = np.asarray(domain_values)
+            as_arr = np.asarray(domain_list)
             if (
                 as_arr.ndim == 1
                 and len(as_arr) == len(domain_list)
@@ -1195,7 +1264,7 @@ def _domain_from_raw_values(
     level_of_measurement: LevelOfMeasurement,
 ) -> npt.NDArray:
     """Compute and validate the value domain from extracted mapping values."""
-    unique_vals = list(dict.fromkeys(distinct_values))
+    unique_vals = [_normalize_scalar(v) for v in dict.fromkeys(distinct_values)]
     try:
         unique_vals = sorted(unique_vals)
     except TypeError:
@@ -1204,7 +1273,8 @@ def _domain_from_raw_values(
     all_numeric = all(_is_numeric_scalar(v) for v in unique_vals)
     all_str = all(isinstance(v, str) for v in unique_vals)
     all_bytes = all(isinstance(v, bytes) for v in unique_vals)
-    has_mixed_types = not (all_numeric or all_str or all_bytes)
+    all_bool = all(isinstance(v, bool) for v in unique_vals)
+    has_mixed_types = not (all_numeric or all_str or all_bytes or all_bool)
     computed_domain = _to_domain_array(unique_vals)
 
     if value_domain is None:
@@ -1220,6 +1290,15 @@ def _domain_from_raw_values(
         ):
             raise ValueError(
                 "When using strings, an ordered value_domain is required for level_of_measurement other than 'nominal'."
+            )
+        if (
+            len(distinct_values) > 0
+            and isinstance(distinct_values[0], (bool, np.bool_))
+            and level_of_measurement != "nominal"
+        ):
+            raise ValueError(
+                "When using booleans, an ordered value_domain is required"
+                " for level_of_measurement other than 'nominal'."
             )
         return computed_domain
 
@@ -1243,7 +1322,8 @@ def _dict_reliability_data_to_value_counts(
     coder_dicts = _extract_coder_dicts(data)
 
     units = list(dict.fromkeys(u for d in coder_dicts for u in d.keys()))
-    distinct_values = list(dict.fromkeys(v for d in coder_dicts for v in d.values() if not _is_missing(v)))
+    distinct_values = [_normalize_scalar(v) for d in coder_dicts for v in d.values() if not _is_missing(v)]
+    distinct_values = list(dict.fromkeys(distinct_values))
     domain_arr = _domain_from_raw_values(distinct_values, value_domain, level_of_measurement)
 
     unit_to_idx = {u: i for i, u in enumerate(units)}
@@ -1253,7 +1333,8 @@ def _dict_reliability_data_to_value_counts(
     for d in coder_dicts:
         for u, v in d.items():
             if not _is_missing(v):
-                idx = val_to_idx.get(v)
+                norm_v = _normalize_scalar(v)
+                idx = val_to_idx.get(norm_v)
                 if idx is None:
                     raise ValueError("The reliability data contains out-of-domain values.")
                 value_counts[unit_to_idx[u], idx] += 1
@@ -1264,15 +1345,17 @@ def _dict_reliability_data_to_value_counts(
 def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
     """Extract unique non-missing values from reliability data."""
     kind = reliability_data.dtype.kind
-    if kind in {"i", "u"}:
+    if kind in {"i", "u", "b"}:
         return np.unique(reliability_data)
     elif kind == "f":
         return np.unique(reliability_data[~np.isnan(reliability_data)])
     elif kind in {"U", "S"}:
         return np.unique(reliability_data[reliability_data != "nan"])
     elif kind == "O":
-        non_missing = [v for v in reliability_data.flat if not _is_missing(v)]
-        if len(non_missing) > 0 and all(_is_numeric_scalar(v) or isinstance(v, (str, bytes)) for v in non_missing):
+        non_missing = [_normalize_scalar(v) for v in reliability_data.flat if not _is_missing(v)]
+        if len(non_missing) > 0 and all(
+            _is_numeric_scalar(v) or isinstance(v, (str, bytes, bool)) for v in non_missing
+        ):
             unique_vals = list(dict.fromkeys(non_missing))
             try:
                 unique_vals = sorted(unique_vals)
@@ -1292,7 +1375,17 @@ def _extract_table_columns(
         or (hasattr(table, "dtype") and getattr(table.dtype, "names", None) is not None)
     )
     if is_column_accessible:
-        return list(table[coder_col]), list(table[unit_col]), list(table[value_col])
+        cols_cache: dict[Any, list[Any]] = {}
+        for col in (coder_col, unit_col, value_col):
+            try:
+                if col not in cols_cache:
+                    cols_cache[col] = list(table[col])
+            except TypeError:
+                pass
+        c_list = list(cols_cache[coder_col]) if coder_col in cols_cache else list(table[coder_col])
+        u_list = list(cols_cache[unit_col]) if unit_col in cols_cache else list(table[unit_col])
+        v_list = list(cols_cache[value_col]) if value_col in cols_cache else list(table[value_col])
+        return c_list, u_list, v_list
     c_list: list[Any] = []
     u_list: list[Any] = []
     v_list: list[Any] = []
@@ -1369,7 +1462,7 @@ def table_to_value_counts(  # noqa: C901
     for c, u, v in zip(c_list, u_list, v_list, strict=True):
         if not _is_missing(c) and not _is_missing(u) and not _is_missing(v):
             valid_u_indices.append(unit_map[u])
-            valid_v.append(v)
+            valid_v.append(_normalize_scalar(v))
 
     if len(valid_v) == 0:
         raise ValueError("No valid non-missing ratings found in the table.")
@@ -1513,16 +1606,20 @@ def _prepare_data_and_domain(  # noqa: C901
                 rel_arr = rel_arr.T
             elif coders_axis not in (0, "rows", "row"):
                 raise ValueError(f"Invalid coders_axis {coders_axis!r}. Expected 0, 1, 'rows', or 'columns'.")
-            if rel_arr.dtype == object:
-                extra_vals: list[Any] = list(_to_domain_array(value_domain)) if value_domain is not None else []
-                if all_rel_arr is not None:
-                    extra_vals = extra_vals + [v for v in all_rel_arr.flat if not _is_missing(v)]
-                rel_arr = _clean_object_array(rel_arr, extra_vals=extra_vals if extra_vals else None)
-            computed_value_domain = _domain_from_reliability_data(rel_arr)
-
             if all_reliability_data is not None:
                 assert all_rel_arr is not None
                 all_computed_domain = _domain_from_reliability_data(all_rel_arr)
+            else:
+                all_computed_domain = None
+
+            if rel_arr.dtype == object:
+                extra_vals: list[Any] = list(_to_domain_array(value_domain)) if value_domain is not None else []
+                if all_computed_domain is not None:
+                    extra_vals = extra_vals + list(all_computed_domain)
+                rel_arr = _clean_object_array(rel_arr, extra_vals=extra_vals if extra_vals else None)
+            computed_value_domain = _domain_from_reliability_data(rel_arr)
+
+            if all_computed_domain is not None:
                 combined_vals = list(dict.fromkeys(list(computed_value_domain) + list(all_computed_domain)))
                 try:
                     combined_vals = sorted(combined_vals)
@@ -1535,12 +1632,20 @@ def _prepare_data_and_domain(  # noqa: C901
             if value_domain is None:
                 kind = rel_arr.dtype.kind
                 all_kind = all_rel_arr.dtype.kind if all_rel_arr is not None else None
-                if (kind in {"U", "S", "O"} or all_kind in {"U", "S", "O"}) and level_of_measurement != "nominal":
+                if (
+                    kind in {"U", "S", "O", "b"} or all_kind in {"U", "S", "O", "b"}
+                ) and level_of_measurement != "nominal":
                     all_numeric = all(_is_numeric_scalar(v) for v in combined_computed_domain)
                     all_str = all(isinstance(v, (str, bytes)) for v in combined_computed_domain)
+                    all_bool = all(isinstance(v, (bool, np.bool_)) for v in combined_computed_domain)
                     if all_str:
                         raise ValueError(
                             "When using strings, an ordered value_domain is required"
+                            " for level_of_measurement other than 'nominal'."
+                        )
+                    if all_bool:
+                        raise ValueError(
+                            "When using booleans, an ordered value_domain is required"
                             " for level_of_measurement other than 'nominal'."
                         )
                     if not all_numeric:
@@ -1554,7 +1659,7 @@ def _prepare_data_and_domain(  # noqa: C901
                 res_domain_set = set(res_domain)
                 if not set(computed_value_domain).issubset(res_domain_set):
                     raise ValueError("The reliability data contains out-of-domain values.")
-                if all_rel_arr is not None and not set(all_computed_domain).issubset(res_domain_set):
+                if all_computed_domain is not None and not set(all_computed_domain).issubset(res_domain_set):
                     raise ValueError("The reference reliability data contains out-of-domain values.")
 
             res_counts = _reliability_data_to_value_counts(rel_arr, res_domain)
