@@ -1007,10 +1007,10 @@ def test_reject_nested_mapping_reference_data() -> None:
     # keys as ratings, which would silently produce incorrect agreement values.
     ref = {"c1": {1: 0, 2: 1}, "c2": {1: 0, 2: 0}}
     data = [[0, 1], [0, 0]]
-    with pytest.raises(ValueError, match="Subsample with dict all_reliability_data is not supported."):
+    with pytest.raises(ValueError, match=re.escape("Subsample with dict all_reliability_data is not supported.")):
         alpha(data, all_reliability_data=ref, level_of_measurement="nominal")
 
-    with pytest.raises(ValueError, match="Subsample with dict all_reliability_data is not supported."):
+    with pytest.raises(ValueError, match=re.escape("Subsample with dict all_reliability_data is not supported.")):
         bootstrap_ci(data, all_reliability_data=ref, level_of_measurement="nominal", random_state=42)
 
 
