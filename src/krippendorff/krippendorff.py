@@ -1213,7 +1213,12 @@ def _extract_table_columns(
     table: Any, coder_col: Any, unit_col: Any, value_col: Any
 ) -> tuple[list[Any], list[Any], list[Any]]:
     """Extract coder, unit, and value columns from tabular data."""
-    if hasattr(table, "__getitem__") and not isinstance(table, (list, tuple)):
+    is_column_accessible = (
+        isinstance(table, Mapping)
+        or hasattr(table, "columns")
+        or (hasattr(table, "dtype") and getattr(table.dtype, "names", None) is not None)
+    )
+    if is_column_accessible and hasattr(table, "__getitem__"):
         try:
             return list(table[coder_col]), list(table[unit_col]), list(table[value_col])
         except (KeyError, TypeError, IndexError):
@@ -1231,6 +1236,8 @@ def table_to_value_counts(  # noqa: C901
     unit_col: Any,
     value_col: Any,
     value_domain: npt.ArrayLike | None = None,
+    *,
+    level_of_measurement: LevelOfMeasurement = "nominal",
 ) -> tuple[npt.NDArray[np.int_], npt.NDArray]:
     """Convert a long/tidy tabular dataset into a (value_counts, value_domain) pair.
 
@@ -1248,6 +1255,8 @@ def table_to_value_counts(  # noqa: C901
     value_domain : array_like, optional
         Explicit domain of possible values. If not provided, it is inferred from unique
         non-missing values observed in `value_col`.
+    level_of_measurement : string or callable, default "nominal"
+        Level of measurement used to validate the inferred value domain.
 
     Returns
     -------
@@ -1263,30 +1272,34 @@ def table_to_value_counts(  # noqa: C901
     if len(c_list) == 0:
         raise ValueError("The provided table is empty.")
 
-    seen_pairs: dict[tuple[Any, Any], Any] = {}
-    valid_c: list[Any] = []
-    valid_u: list[Any] = []
+    # Register each non-missing unit first so units with all-missing ratings are retained
+    unit_map: dict[Any, int] = {}
+    for u in u_list:
+        if not _is_missing(u) and u not in unit_map:
+            unit_map[u] = len(unit_map)
+
+    if len(unit_map) == 0:
+        raise ValueError("No valid units found in the table.")
+
+    # Check for duplicate ratings per (coder, unit) pair
+    seen_pairs: set[tuple[Any, Any]] = set()
+    for c, u in zip(c_list, u_list, strict=True):
+        if not _is_missing(c) and not _is_missing(u):
+            pair = (c, u)
+            if pair in seen_pairs:
+                raise ValueError(f"Coder {c!r} has duplicate ratings for unit {u!r}.")
+            seen_pairs.add(pair)
+
+    # Collect valid non-missing ratings
+    valid_u_indices: list[int] = []
     valid_v: list[Any] = []
     for c, u, v in zip(c_list, u_list, v_list, strict=True):
-        if _is_missing(c) or _is_missing(u) or _is_missing(v):
-            continue
-        pair = (c, u)
-        if pair in seen_pairs:
-            raise ValueError(f"Coder {c!r} has duplicate ratings for unit {u!r}.")
-        seen_pairs[pair] = v
-        valid_c.append(c)
-        valid_u.append(u)
-        valid_v.append(v)
+        if not _is_missing(c) and not _is_missing(u) and not _is_missing(v):
+            valid_u_indices.append(unit_map[u])
+            valid_v.append(v)
 
-    if len(valid_u) == 0:
+    if len(valid_v) == 0:
         raise ValueError("No valid non-missing ratings found in the table.")
-
-    unit_map: dict[Any, int] = {}
-    unit_indices: list[int] = []
-    for u in valid_u:
-        if u not in unit_map:
-            unit_map[u] = len(unit_map)
-        unit_indices.append(unit_map[u])
 
     if value_domain is not None:
         domain_arr = _to_domain_array(value_domain)
@@ -1297,11 +1310,11 @@ def table_to_value_counts(  # noqa: C901
         val_indices = np.array([val_map[v] for v in valid_v], dtype=int)
     else:
         distinct_v = list(dict.fromkeys(valid_v))
-        domain_arr = _domain_from_raw_values(distinct_v, value_domain=None, level_of_measurement="nominal")
+        domain_arr = _domain_from_raw_values(distinct_v, value_domain=None, level_of_measurement=level_of_measurement)
         val_map = {val: i for i, val in enumerate(domain_arr)}
         val_indices = np.array([val_map[v] for v in valid_v], dtype=int)
 
-    unit_arr = np.array(unit_indices, dtype=np.int_)
+    unit_arr = np.array(valid_u_indices, dtype=np.int_)
     val_arr = np.array(val_indices, dtype=np.int_)
     value_counts = np.zeros((len(unit_map), len(domain_arr)), dtype=np.int_)
     np.add.at(value_counts, (unit_arr, val_arr), 1)
@@ -1351,8 +1364,50 @@ def _prepare_data_and_domain(  # noqa: C901
             raise ValueError("A tabular dataset must be provided as reliability_data when specifying column names.")
         if value_counts is not None:
             raise ValueError("Cannot provide value_counts when coder_col, unit_col, and value_col are specified.")
+
+        c_list, u_list, v_list = _extract_table_columns(reliability_data, coder_col, unit_col, value_col)
+        if not (len(c_list) == len(u_list) == len(v_list)):
+            raise ValueError("Columns coder_col, unit_col, and value_col must all have the same length.")
+        if len(c_list) == 0:
+            raise ValueError("The provided table is empty.")
+
+        table_valid_v = [
+            v
+            for c, u, v in zip(c_list, u_list, v_list, strict=True)
+            if not _is_missing(c) and not _is_missing(u) and not _is_missing(v)
+        ]
+        if len(table_valid_v) == 0:
+            raise ValueError("No valid non-missing ratings found in the table.")
+
+        if value_domain is not None:
+            effective_domain = _to_domain_array(value_domain)
+            domain_set = set(effective_domain)
+            if any(v not in domain_set for v in table_valid_v):
+                raise ValueError("The reliability data contains out-of-domain values.")
+            if all_rel_arr is not None:
+                all_computed_domain = _domain_from_reliability_data(all_rel_arr)
+                if not np.isin(all_computed_domain, effective_domain).all():
+                    raise ValueError("The reference reliability data contains out-of-domain values.")
+        else:
+            distinct_table_v = list(dict.fromkeys(table_valid_v))
+            if all_rel_arr is not None:
+                all_computed_domain = _domain_from_reliability_data(all_rel_arr)
+                combined_vals = list(dict.fromkeys(distinct_table_v + list(all_computed_domain)))
+                effective_domain = _domain_from_raw_values(
+                    combined_vals, value_domain=None, level_of_measurement=level_of_measurement
+                )
+            else:
+                effective_domain = _domain_from_raw_values(
+                    distinct_table_v, value_domain=None, level_of_measurement=level_of_measurement
+                )
+
         res_counts, res_domain = table_to_value_counts(
-            reliability_data, coder_col, unit_col, value_col, value_domain=value_domain
+            reliability_data,
+            coder_col,
+            unit_col,
+            value_col,
+            value_domain=effective_domain,
+            level_of_measurement=level_of_measurement,
         )
         if len(res_domain) <= 1:
             raise ValueError("There has to be more than one value in the domain.")
@@ -1821,14 +1876,14 @@ def alpha_table(
     alpha : float or AlphaResult
         Krippendorff's alpha point estimate, or `AlphaResult` if `return_components=True`.
     """
-    vc, dom = table_to_value_counts(
-        table, coder_col=coder_col, unit_col=unit_col, value_col=value_col, value_domain=value_domain
-    )
     return alpha(
-        value_counts=vc,
-        value_domain=dom,
+        reliability_data=table,
+        coder_col=coder_col,
+        unit_col=unit_col,
+        value_col=value_col,
         level_of_measurement=level_of_measurement,
         dtype=dtype,
+        value_domain=value_domain,
         all_reliability_data=all_reliability_data,
         all_value_counts=all_value_counts,
         random_coincidences=random_coincidences,
@@ -2218,9 +2273,10 @@ def bootstrap_ci(  # noqa: C901
         value_domain=domain,
         level_of_measurement=level_of_measurement,
         dtype=dtype,
-        all_reliability_data=all_reliability_data,
+        all_reliability_data=all_rel_arr,
         all_value_counts=all_value_counts,
         random_coincidences=random_coincidences,
+        coders_axis="rows",
         return_components=True,
     )
     observed_alpha = obs_res.alpha
@@ -2455,12 +2511,11 @@ def bootstrap_ci_table(
     result : BootstrapResult
         Named tuple containing bootstrap results.
     """
-    vc, dom = table_to_value_counts(
-        table, coder_col=coder_col, unit_col=unit_col, value_col=value_col, value_domain=value_domain
-    )
     return bootstrap_ci(
-        value_counts=vc,
-        value_domain=dom,
+        reliability_data=table,
+        coder_col=coder_col,
+        unit_col=unit_col,
+        value_col=value_col,
         level_of_measurement=level_of_measurement,
         n_resamples=n_resamples,
         confidence_level=confidence_level,
@@ -2472,4 +2527,5 @@ def bootstrap_ci_table(
         random_coincidences=random_coincidences,
         return_distribution=return_distribution,
         dtype=dtype,
+        value_domain=value_domain,
     )

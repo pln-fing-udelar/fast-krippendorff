@@ -648,3 +648,123 @@ def test_bootstrap_ci_table_with_value_domain() -> None:
         random_state=42,
     )
     assert np.isclose(res.alpha, 1.0)
+
+
+def test_extract_table_columns_2d_numpy_array() -> None:
+    # 2D NumPy array where rows represent records
+    table_arr = np.array(
+        [
+            [1, 10, 1],
+            [2, 10, 2],
+            [1, 20, 1],
+            [2, 20, 2],
+        ]
+    )
+    res = alpha_table(table_arr, coder_col=0, unit_col=1, value_col=2, level_of_measurement="interval")
+    expected = alpha([[1, 1], [2, 2]], level_of_measurement="interval")
+    assert np.isclose(res, expected)
+
+
+def test_table_all_missing_unit_retained_in_counts() -> None:
+    table = {
+        "coder": ["c1", "c2", "c1", "c2"],
+        "unit": ["u1", "u1", "u2", "u2"],
+        "value": [1, 2, np.nan, None],
+    }
+    vc, dom = table_to_value_counts(table, coder_col="coder", unit_col="unit", value_col="value")
+    # Unit u2 has only missing ratings, but must still be retained as a row with count 0
+    assert vc.shape == (2, 2)
+    assert vc[0].sum() == 2
+    assert vc[1].sum() == 0
+    assert list(dom) == [1, 2]
+
+
+def test_table_string_ratings_require_domain_for_non_nominal() -> None:
+    table = {
+        "coder": ["c1", "c2", "c1", "c2"],
+        "unit": ["u1", "u1", "u2", "u2"],
+        "value": ["low", "med", "low", "high"],
+    }
+    # Non-nominal level of measurement without explicit value_domain must raise ValueError
+    with pytest.raises(ValueError, match="When using strings, an ordered value_domain is required"):
+        alpha_table(table, coder_col="coder", unit_col="unit", value_col="value", level_of_measurement="ordinal")
+
+    with pytest.raises(ValueError, match="When using strings, an ordered value_domain is required"):
+        table_to_value_counts(
+            table, coder_col="coder", unit_col="unit", value_col="value", level_of_measurement="ordinal"
+        )
+
+
+def test_table_with_all_reliability_data_unions_unseen_reference_categories() -> None:
+    # Subsample table only contains ratings 1 and 2
+    subsample_table = {
+        "coder": ["c1", "c2", "c1", "c2"],
+        "unit": ["u1", "u1", "u2", "u2"],
+        "value": [1, 2, 1, 2],
+    }
+    # Reference data contains category 3, which never appears in the subsample table
+    reference_matrix = np.array(
+        [
+            [1, 2, 3],
+            [1, 2, 3],
+        ]
+    )
+    # Without explicit value_domain, domain should union categories from table and reference data
+    res_table = alpha_table(
+        subsample_table,
+        coder_col="coder",
+        unit_col="unit",
+        value_col="value",
+        all_reliability_data=reference_matrix,
+        level_of_measurement="interval",
+    )
+    res_direct = alpha(
+        subsample_table,
+        coder_col="coder",
+        unit_col="unit",
+        value_col="value",
+        all_reliability_data=reference_matrix,
+        level_of_measurement="interval",
+    )
+    expected = alpha(
+        [[1, 1], [2, 2]],
+        all_reliability_data=reference_matrix,
+        level_of_measurement="interval",
+    )
+    assert np.isclose(res_table, expected)
+    assert np.isclose(res_direct, expected)
+
+
+def test_bootstrap_ci_with_reference_matrix_and_coders_axis_columns() -> None:
+    matrix = np.array(
+        [
+            [1.0, 2.0, 1.0, 2.0],
+            [2.0, 2.0, 1.0, 1.0],
+        ]
+    )
+    reference = np.array(
+        [
+            [1.0, 2.0, 3.0, 1.0, 2.0],
+            [2.0, 2.0, 3.0, 1.0, 1.0],
+        ]
+    )
+    # Rows as coders:
+    res_rows = bootstrap_ci(
+        matrix,
+        all_reliability_data=reference,
+        coders_axis="rows",
+        level_of_measurement="interval",
+        random_state=42,
+    )
+    # Columns as coders (transposed inputs):
+    res_cols = bootstrap_ci(
+        matrix.T,
+        all_reliability_data=reference.T,
+        coders_axis="columns",
+        level_of_measurement="interval",
+        random_state=42,
+    )
+    assert np.isclose(res_rows.alpha, res_cols.alpha)
+    assert np.isclose(res_rows.confidence_interval[0], res_cols.confidence_interval[0])
+    assert np.isclose(res_rows.confidence_interval[1], res_cols.confidence_interval[1])
+    assert np.isclose(res_rows.standard_error, res_cols.standard_error)
