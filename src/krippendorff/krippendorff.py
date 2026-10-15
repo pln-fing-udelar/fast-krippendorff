@@ -1250,9 +1250,7 @@ def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
         return np.unique(reliability_data[reliability_data != "nan"])
     elif kind == "O":
         non_missing = [v for v in reliability_data.flat if not _is_missing(v)]
-        if len(non_missing) > 0 and (
-            all(_is_numeric_scalar(v) for v in non_missing) or all(isinstance(v, (str, bytes)) for v in non_missing)
-        ):
+        if len(non_missing) > 0 and all(_is_numeric_scalar(v) or isinstance(v, (str, bytes)) for v in non_missing):
             unique_vals = list(dict.fromkeys(non_missing))
             try:
                 unique_vals = sorted(unique_vals)
@@ -1407,8 +1405,9 @@ def _prepare_data_and_domain(  # noqa: C901
             all_rel_arr = all_rel_arr.T
         elif coders_axis not in (0, "rows", "row"):
             raise ValueError(f"Invalid coders_axis {coders_axis!r}. Expected 0, 1, 'rows', or 'columns'.")
-        extra_domain_vals = list(_to_domain_array(value_domain)) if value_domain is not None else None
-        all_rel_arr = _clean_object_array(all_rel_arr, extra_vals=extra_domain_vals)
+        if all_rel_arr.dtype == object:
+            extra_domain_vals = list(_to_domain_array(value_domain)) if value_domain is not None else None
+            all_rel_arr = _clean_object_array(all_rel_arr, extra_vals=extra_domain_vals)
 
     if coder_col is not None or unit_col is not None or value_col is not None:
         if not (coder_col is not None and unit_col is not None and value_col is not None):
@@ -1489,10 +1488,11 @@ def _prepare_data_and_domain(  # noqa: C901
                 rel_arr = rel_arr.T
             elif coders_axis not in (0, "rows", "row"):
                 raise ValueError(f"Invalid coders_axis {coders_axis!r}. Expected 0, 1, 'rows', or 'columns'.")
-            extra_vals: list[Any] = list(_to_domain_array(value_domain)) if value_domain is not None else []
-            if all_rel_arr is not None:
-                extra_vals = extra_vals + [v for v in all_rel_arr.flat if not _is_missing(v)]
-            rel_arr = _clean_object_array(rel_arr, extra_vals=extra_vals if extra_vals else None)
+            if rel_arr.dtype == object:
+                extra_vals: list[Any] = list(_to_domain_array(value_domain)) if value_domain is not None else []
+                if all_rel_arr is not None:
+                    extra_vals = extra_vals + [v for v in all_rel_arr.flat if not _is_missing(v)]
+                rel_arr = _clean_object_array(rel_arr, extra_vals=extra_vals if extra_vals else None)
             computed_value_domain = _domain_from_reliability_data(rel_arr)
 
             if all_reliability_data is not None:
@@ -1511,10 +1511,16 @@ def _prepare_data_and_domain(  # noqa: C901
                 kind = rel_arr.dtype.kind
                 all_kind = all_rel_arr.dtype.kind if all_rel_arr is not None else None
                 if (kind in {"U", "S", "O"} or all_kind in {"U", "S", "O"}) and level_of_measurement != "nominal":
-                    has_str = any(isinstance(v, (str, bytes)) for v in combined_computed_domain)
-                    if has_str:
+                    all_numeric = all(_is_numeric_scalar(v) for v in combined_computed_domain)
+                    all_str = all(isinstance(v, (str, bytes)) for v in combined_computed_domain)
+                    if all_str:
                         raise ValueError(
                             "When using strings, an ordered value_domain is required"
+                            " for level_of_measurement other than 'nominal'."
+                        )
+                    if not all_numeric:
+                        raise ValueError(
+                            "When using mixed types, an ordered value_domain is required"
                             " for level_of_measurement other than 'nominal'."
                         )
                 res_domain = combined_computed_domain

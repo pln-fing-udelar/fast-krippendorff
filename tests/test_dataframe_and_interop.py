@@ -1040,3 +1040,31 @@ def test_table_with_iterator_columns() -> None:
         random_state=42,
     )
     assert np.isclose(res_boot.alpha, 0.4)
+
+
+def test_mixed_numeric_and_string_labels_nominal() -> None:
+    # Copilot review finding:
+    # Allow mixed numeric and string labels for nominal measurements in wide mappings and object arrays.
+    data = {"c1": [1, "a"], "c2": [1, "a"]}
+    res = alpha(data, coders_axis="columns", level_of_measurement="nominal")
+    assert np.isclose(res, 1.0)
+
+    res_ci = bootstrap_ci(data, coders_axis="columns", level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0)
+
+    # Object array input directly
+    arr = np.array([[1, "a"], [1, "a"]], dtype=object)
+    res_arr = alpha(arr, level_of_measurement="nominal")
+    assert np.isclose(res_arr, 1.0)
+
+    # Non-nominal with mixed labels without explicit domain should raise ValueError
+    with pytest.raises(ValueError, match=re.escape("When using mixed types, an ordered value_domain is required")):
+        alpha(arr, level_of_measurement="ordinal")
+
+
+def test_numeric_ratings_subsample_skips_reference_scan() -> None:
+    # Ordinary numeric float/int arrays bypass reference scan and clean_object_array
+    sample = np.array([[1.0, 2.0], [1.0, 2.0]])
+    ref = np.array([[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]])
+    res = alpha(sample, all_reliability_data=ref, level_of_measurement="interval")
+    assert np.isclose(res, 1.0)
