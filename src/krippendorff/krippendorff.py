@@ -1012,12 +1012,30 @@ def _is_missing(val: Any) -> bool:
     return False
 
 
-def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:
+_DEFAULT_COL: Any = object()
+
+
+def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:  # noqa: C901
     """Convert array-like, tensor, or dataframe to a numpy ndarray without forcing framework imports."""
     if hasattr(data, "detach") and callable(data.detach):
         data = data.detach()
     if hasattr(data, "cpu") and callable(data.cpu):
         data = data.cpu()
+    if hasattr(data, "columns") and not callable(data.columns):
+        try:
+            if hasattr(data, "iloc"):
+                cols_data = [list(data.iloc[:, i]) for i in range(data.shape[1])]
+            elif hasattr(data, "__getitem__"):
+                cols_data = [list(data[c]) for c in list(data.columns)]
+            else:
+                cols_data = None
+            if cols_data is not None:
+                if len(cols_data) == 0:
+                    return np.empty((0, 0), dtype=dtype if dtype is not None else object)
+                extracted = np.asarray(cols_data, dtype=object).T
+                return np.asarray(extracted, dtype=dtype) if dtype is not None else extracted
+        except Exception:
+            pass
     if hasattr(data, "to_numpy") and callable(data.to_numpy):
         data = data.to_numpy()
     elif hasattr(data, "numpy") and callable(data.numpy):
@@ -1386,9 +1404,9 @@ def _prepare_data_and_domain(  # noqa: C901
     all_value_counts: Any = None,
     random_coincidences: Any = None,
     coders_axis: CodersAxis = "rows",
-    coder_col: Any = None,
-    unit_col: Any = None,
-    value_col: Any = None,
+    coder_col: Any = _DEFAULT_COL,
+    unit_col: Any = _DEFAULT_COL,
+    value_col: Any = _DEFAULT_COL,
 ) -> tuple[npt.NDArray[np.int_], npt.NDArray, npt.NDArray | None]:
     """Validate and prepare value_counts and value_domain from raw data inputs."""
     subsample_params = [
@@ -1416,8 +1434,8 @@ def _prepare_data_and_domain(  # noqa: C901
             extra_domain_vals = list(_to_domain_array(value_domain)) if value_domain is not None else None
             all_rel_arr = _clean_object_array(all_rel_arr, extra_vals=extra_domain_vals)
 
-    if coder_col is not None or unit_col is not None or value_col is not None:
-        if not (coder_col is not None and unit_col is not None and value_col is not None):
+    if coder_col is not _DEFAULT_COL or unit_col is not _DEFAULT_COL or value_col is not _DEFAULT_COL:
+        if coder_col is _DEFAULT_COL or unit_col is _DEFAULT_COL or value_col is _DEFAULT_COL:
             raise ValueError("All three of coder_col, unit_col, and value_col must be specified together.")
         if reliability_data is None:
             raise ValueError("A tabular dataset must be provided as reliability_data when specifying column names.")
@@ -1712,9 +1730,9 @@ def alpha(
     dtype: npt.DTypeLike = DEFAULT_DTYPE,
     *,
     coders_axis: CodersAxis = "rows",
-    coder_col: Any = None,
-    unit_col: Any = None,
-    value_col: Any = None,
+    coder_col: Any = _DEFAULT_COL,
+    unit_col: Any = _DEFAULT_COL,
+    value_col: Any = _DEFAULT_COL,
     all_reliability_data: Any = None,
     all_value_counts: Any = None,
     random_coincidences: Any = None,
@@ -2225,9 +2243,9 @@ def bootstrap_ci(  # noqa: C901
     random_coincidences: Any = None,
     return_distribution: bool = False,
     coders_axis: CodersAxis = "rows",
-    coder_col: Any = None,
-    unit_col: Any = None,
-    value_col: Any = None,
+    coder_col: Any = _DEFAULT_COL,
+    unit_col: Any = _DEFAULT_COL,
+    value_col: Any = _DEFAULT_COL,
 ) -> BootstrapResult:
     """Compute bootstrap confidence intervals and statistical significance test for Krippendorff's alpha.
 

@@ -1201,3 +1201,65 @@ def test_table_with_record_iterator() -> None:
         random_state=42,
     )
     assert np.isclose(res_ci.alpha, 1.0)
+
+
+def test_mixed_dtype_dataframe_preserves_large_integers() -> None:
+    # Copilot review finding (discussion_r4279110639):
+    # Mixed-dtype DataFrames must not be coerced to float64, which would merge large integers >= 2**53.
+    b = 2**53
+    df = MockDataFrame({"u0": [0.0, 0.0], "u1": [b, b + 1], "u2": [b + 1, b]})
+    assert np.isclose(alpha(df, level_of_measurement="nominal"), 1 / 6)
+
+    res_ci = bootstrap_ci(df, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1 / 6)
+
+    # Test column-oriented layout
+    df_cols = MockDataFrame({"c0": [0.0, b, b + 1], "c1": [0.0, b + 1, b]})
+    assert np.isclose(alpha(df_cols, coders_axis="columns", level_of_measurement="nominal"), 1 / 6)
+    res_ci_cols = bootstrap_ci(df_cols, coders_axis="columns", level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci_cols.alpha, 1 / 6)
+
+
+def test_sentinel_supports_none_valued_column_labels() -> None:
+    # Copilot review finding (Previously missed):
+    # None is a valid hashable column label and must not be treated as an omitted selector.
+    table = {None: ["c1", "c2", "c1", "c2"], "unit": ["u1", "u1", "u2", "u2"], "value": [1, 1, 2, 2]}
+
+    vc, dom = table_to_value_counts(table, coder_col=None, unit_col="unit", value_col="value")
+    assert np.array_equal(vc, [[2, 0], [0, 2]])
+    assert np.array_equal(dom, [1, 2])
+
+    assert np.isclose(
+        alpha_table(table, coder_col=None, unit_col="unit", value_col="value", level_of_measurement="nominal"), 1.0
+    )
+    res_ci_table = bootstrap_ci_table(
+        table, coder_col=None, unit_col="unit", value_col="value", level_of_measurement="nominal", random_state=42
+    )
+    assert np.isclose(res_ci_table.alpha, 1.0)
+
+    assert np.isclose(
+        alpha(table, coder_col=None, unit_col="unit", value_col="value", level_of_measurement="nominal"), 1.0
+    )
+    res_ci = bootstrap_ci(
+        table, coder_col=None, unit_col="unit", value_col="value", level_of_measurement="nominal", random_state=42
+    )
+    assert np.isclose(res_ci.alpha, 1.0)
+
+    # None as unit_col
+    table_u = {"coder": ["c1", "c2", "c1", "c2"], None: ["u1", "u1", "u2", "u2"], "value": [1, 1, 2, 2]}
+    assert np.isclose(
+        alpha_table(table_u, coder_col="coder", unit_col=None, value_col="value", level_of_measurement="nominal"), 1.0
+    )
+
+    # None as value_col
+    table_v = {"coder": ["c1", "c2", "c1", "c2"], "unit": ["u1", "u1", "u2", "u2"], None: [1, 1, 2, 2]}
+    assert np.isclose(
+        alpha_table(table_v, coder_col="coder", unit_col="unit", value_col=None, level_of_measurement="nominal"), 1.0
+    )
+
+    # Partial arguments with None selector must raise
+    with pytest.raises(ValueError, match="All three of coder_col, unit_col, and value_col must be specified together"):
+        alpha(table, coder_col=None)
+
+    with pytest.raises(ValueError, match="All three of coder_col, unit_col, and value_col must be specified together"):
+        alpha(table, coder_col=None, unit_col="unit")
