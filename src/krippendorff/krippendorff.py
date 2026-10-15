@@ -199,14 +199,12 @@ def _interval_metric(
     dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Metric for interval data."""
+    calc_dtype = np.result_type(v1.dtype, v2.dtype, dtype)
     if np.issubdtype(v1.dtype, np.integer) or np.issubdtype(v2.dtype, np.integer):
-        diff = (v1.astype(object) - v2.astype(object)).astype(dtype)
-    elif np.issubdtype(v1.dtype, np.floating) and np.issubdtype(v2.dtype, np.floating):
-        calc_dtype = np.float64 if np.dtype(dtype).itemsize < 8 and np.issubdtype(dtype, np.floating) else dtype
-        diff = (v1.astype(calc_dtype) - v2.astype(calc_dtype)).astype(dtype)
+        diff = (v1.astype(object) - v2.astype(object)).astype(calc_dtype)
     else:
-        diff = (v1 - v2).astype(dtype)  # ty:ignore[unsupported-operator]
-    return diff**2
+        diff = v1.astype(calc_dtype) - v2.astype(calc_dtype)
+    return (diff**2).astype(dtype)
 
 
 def _ratio_metric(
@@ -218,30 +216,27 @@ def _ratio_metric(
     dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Metric for ratio data."""
+    calc_dtype = np.result_type(v1.dtype, v2.dtype, dtype)
     if np.issubdtype(v1.dtype, np.integer) or np.issubdtype(v2.dtype, np.integer):
         v1_obj = v1.astype(object)
         v2_obj = v2.astype(object)
-        diff = (v1_obj - v2_obj).astype(dtype)
-        v1_plus_v2 = (v1_obj + v2_obj).astype(dtype)
-    elif np.issubdtype(v1.dtype, np.floating) and np.issubdtype(v2.dtype, np.floating):
-        calc_dtype = np.float64 if np.dtype(dtype).itemsize < 8 and np.issubdtype(dtype, np.floating) else dtype
+        diff = (v1_obj - v2_obj).astype(calc_dtype)
+        v1_plus_v2 = (v1_obj + v2_obj).astype(calc_dtype)
+    else:
         v1_c = v1.astype(calc_dtype)
         v2_c = v2.astype(calc_dtype)
-        diff = (v1_c - v2_c).astype(dtype)
-        v1_plus_v2 = (v1_c + v2_c).astype(dtype)
-    else:
-        diff = (v1 - v2).astype(dtype)  # ty:ignore[unsupported-operator]
-        v1_plus_v2 = v1 + v2  # ty:ignore[unsupported-operator]
+        diff = v1_c - v2_c
+        v1_plus_v2 = v1_c + v2_c
     return (
         np.divide(
             diff,
             v1_plus_v2,
-            out=np.zeros(np.broadcast(v1, v2).shape, dtype=dtype),
+            out=np.zeros(np.broadcast(v1, v2).shape, dtype=calc_dtype),
             where=v1_plus_v2 != 0,
-            dtype=dtype,
+            dtype=calc_dtype,
         )
         ** 2
-    )
+    ).astype(dtype)
 
 
 setattr(_nominal_metric, "marginal_dependent", False)  # noqa: B010

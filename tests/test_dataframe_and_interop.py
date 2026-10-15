@@ -1503,3 +1503,30 @@ def test_stream_annotation_normalization_coder_mappings() -> None:
 
     res_alpha = alpha(data, level_of_measurement="nominal")
     assert np.isclose(res_alpha, 1.0)
+
+
+def test_preserve_input_precision_interval_and_ratio_metrics() -> None:
+    # Copilot review findings (discussion_r4279483025, discussion_r4279483052):
+    # Preserving input precision when output dtype is narrower (e.g. complex64).
+    a = 1.0
+    b = 1.0 + 2**-30
+    ratings = [[a, b], [a, b]]
+
+    res_interval = alpha(ratings, level_of_measurement="interval", dtype=np.complex64)
+    assert np.isclose(res_interval, 1.0)
+
+    res_ratio = alpha(ratings, level_of_measurement="ratio", dtype=np.complex64)
+    assert np.isclose(res_ratio, 1.0)
+
+    # Extended-precision longdouble with default float64 output
+    if np.finfo(np.longdouble).precision > np.finfo(np.float64).precision:
+        a_ld = np.longdouble(1.0)
+        eps = np.finfo(np.longdouble).eps
+        b_ld = a_ld + eps
+        ratings_ld = np.array([[a_ld, b_ld], [a_ld, b_ld]])
+
+        res_interval_ld = alpha(ratings_ld, level_of_measurement="interval", dtype=np.float64)
+        assert np.isclose(res_interval_ld, 1.0)
+
+        res_ratio_ld = alpha(ratings_ld, level_of_measurement="ratio", dtype=np.float64)
+        assert np.isclose(res_ratio_ld, 1.0)
