@@ -999,3 +999,44 @@ def test_prevent_float64_coercion_merging_large_integer_domain_values() -> None:
 
     res_ci = bootstrap_ci(data, value_domain=domain, level_of_measurement="nominal", random_state=42)
     assert np.isclose(res_ci.alpha, 1.0)
+
+
+def test_reject_nested_mapping_reference_data() -> None:
+    # Copilot review finding (discussion_r4278767326):
+    # Reject nested mappings as reference data (all_reliability_data) instead of treating
+    # keys as ratings, which would silently produce incorrect agreement values.
+    ref = {"c1": {1: 0, 2: 1}, "c2": {1: 0, 2: 0}}
+    data = [[0, 1], [0, 0]]
+    with pytest.raises(ValueError, match="Subsample with dict all_reliability_data is not supported."):
+        alpha(data, all_reliability_data=ref, level_of_measurement="nominal")
+
+    with pytest.raises(ValueError, match="Subsample with dict all_reliability_data is not supported."):
+        bootstrap_ci(data, all_reliability_data=ref, level_of_measurement="nominal", random_state=42)
+
+
+def test_table_with_iterator_columns() -> None:
+    # Copilot review finding (discussion_r4278767388):
+    # For a mapping whose columns are single-use iterators, extracting columns must not exhaust
+    # them before table_to_value_counts() is called.
+    table = {
+        "coder": iter(["c1", "c2", "c1", "c2"]),
+        "unit": iter(["u1", "u1", "u2", "u2"]),
+        "val": iter([1, 1, 2, 3]),
+    }
+    res_table = alpha_table(table, coder_col="coder", unit_col="unit", value_col="val", level_of_measurement="nominal")
+    assert np.isclose(res_table, 0.4)
+
+    table_boot = {
+        "coder": iter(["c1", "c2", "c1", "c2"]),
+        "unit": iter(["u1", "u1", "u2", "u2"]),
+        "val": iter([1, 1, 2, 3]),
+    }
+    res_boot = bootstrap_ci_table(
+        table_boot,
+        coder_col="coder",
+        unit_col="unit",
+        value_col="val",
+        level_of_measurement="nominal",
+        random_state=42,
+    )
+    assert np.isclose(res_boot.alpha, 0.4)

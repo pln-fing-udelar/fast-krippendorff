@@ -1021,7 +1021,11 @@ def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:
     elif (
         isinstance(data, Mapping)
         and len(data) > 0
-        and all(isinstance(v, (list, tuple, np.ndarray)) or hasattr(v, "__iter__") for v in data.values())
+        and all(
+            (isinstance(v, (list, tuple, np.ndarray)) or (hasattr(v, "__iter__") and not isinstance(v, (str, bytes))))
+            and not isinstance(v, Mapping)
+            for v in data.values()
+        )
     ):
         data = np.asarray([list(v) for v in data.values()], dtype=object).T
     else:
@@ -1394,6 +1398,8 @@ def _prepare_data_and_domain(  # noqa: C901
 
     all_rel_arr: npt.NDArray | None = None
     if all_reliability_data is not None:
+        if _is_dict_reliability_data(all_reliability_data):
+            raise ValueError("Subsample with dict all_reliability_data is not supported.")
         all_rel_arr = _to_numpy_array(all_reliability_data)
         if all_rel_arr.ndim != 2:
             raise ValueError("The all_reliability_data must be a 2D array.")
@@ -1448,8 +1454,9 @@ def _prepare_data_and_domain(  # noqa: C901
                     distinct_table_v, value_domain=None, level_of_measurement=level_of_measurement
                 )
 
+        materialized_table = {coder_col: c_list, unit_col: u_list, value_col: v_list}
         res_counts, res_domain = table_to_value_counts(
-            reliability_data,
+            materialized_table,
             coder_col,
             unit_col,
             value_col,
