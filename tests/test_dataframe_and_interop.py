@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, ClassVar
+from typing import Any
 
 import numpy as np
 import pytest
@@ -837,22 +837,37 @@ def test_table_and_dict_uncovered_error_branches() -> None:
             value_domain=[1, 2],
         )
 
-    # 8. Column-accessible table whose __getitem__ raises KeyError falls back to row iteration
-    class TableWithBrokenGetitem:
-        columns: ClassVar[list[str]] = ["coder", "unit", "value"]
+    # 8. Column-accessible table propagates KeyError when column is missing
+    with pytest.raises(KeyError, match=re.escape("missing_col")):
+        alpha_table(
+            {"coder": [1, 2], "unit": ["u1", "u2"], "value": [10, 20]},
+            coder_col="missing_col",
+            unit_col="unit",
+            value_col="value",
+        )
 
-        def __getitem__(self, key: Any) -> Any:
-            raise KeyError(key)
 
-        def __iter__(self) -> Any:
-            return iter(
-                [
-                    {"coder": "c1", "unit": "u1", "value": 1},
-                    {"coder": "c2", "unit": "u1", "value": 1},
-                    {"coder": "c1", "unit": "u2", "value": 2},
-                    {"coder": "c2", "unit": "u2", "value": 2},
-                ]
-            )
+def test_preserve_exact_integer_labels_in_object_array() -> None:
+    # Copilot review finding:
+    # Nominal ratings [[0, 2**53, 2**53 + 1], [0, 2**53 + 1, 2**53]] with dtype=object
+    # must not merge 2**53 and 2**53 + 1 into the same float64 (which would produce alpha=1.0 instead of 1/6)
+    data = np.array([[0, 2**53, 2**53 + 1], [0, 2**53 + 1, 2**53]], dtype=object)
 
-    res = alpha_table(TableWithBrokenGetitem(), coder_col="coder", unit_col="unit", value_col="value")
-    assert np.isclose(res, 1.0)
+    res_alpha = alpha(data, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0 / 6.0)
+
+    res_ci = bootstrap_ci(data, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0 / 6.0)
+
+    # With missing values / None
+    data_with_none = np.array([[0, 2**53, 2**53 + 1], [0, None, 2**53]], dtype=object)
+    res_alpha_none = alpha(data_with_none, level_of_measurement="nominal")
+    res_ci_none = bootstrap_ci(data_with_none, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_alpha_none, res_ci_none.alpha)
+
+    # Arbitrarily large integers (> 2**64)
+    data_huge = np.array([[0, 2**100, 2**100 + 1], [0, 2**100 + 1, 2**100]], dtype=object)
+    res_alpha_huge = alpha(data_huge, level_of_measurement="nominal")
+    assert np.isclose(res_alpha_huge, 1.0 / 6.0)
+    res_ci_huge = bootstrap_ci(data_huge, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci_huge.alpha, 1.0 / 6.0)

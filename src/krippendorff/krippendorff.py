@@ -1029,8 +1029,20 @@ def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:
     return np.asarray(data, dtype=dtype) if dtype is not None else np.asarray(data)
 
 
-def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:
-    """Normalize object ndarray by replacing missing sentinels with NaN and downcasting numeric arrays."""
+def _can_safely_cast_to_float(vals: Sequence[Any]) -> bool:
+    """Check if all numeric values can be converted to float without losing integer precision."""
+    for v in vals:
+        if isinstance(v, (int, np.integer)) and not isinstance(v, bool):
+            try:
+                if int(float(v)) != v:
+                    return False
+            except (OverflowError, ValueError):
+                return False
+    return True
+
+
+def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:  # noqa: C901
+    """Normalize object ndarray by replacing missing sentinels with NaN and downcasting numeric arrays when safe."""
     if arr.dtype != object:
         return arr
     out = np.empty(arr.shape, dtype=object)
@@ -1041,11 +1053,29 @@ def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:
             out[idx] = val
     non_nan = [v for v in out.flat if not (isinstance(v, float) and np.isnan(v))]
     if len(non_nan) > 0:
-        if all(_is_numeric_scalar(v) for v in non_nan):
-            try:
-                return out.astype(float)
-            except Exception:
-                pass
+        if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in non_nan):
+            # If all are integers and there are no NaNs, try integer downcasting if it doesn't overflow or alter values
+            if not any(isinstance(v, float) and np.isnan(v) for v in out.flat):
+                try:
+                    int_arr = out.astype(int)
+                    if all(int_arr[idx] == out[idx] for idx, _ in np.ndenumerate(out)):
+                        return int_arr
+                except Exception:
+                    pass
+            # If there are NaNs or large integers, only downcast to float if every integer is preserved exactly
+            if _can_safely_cast_to_float(non_nan):
+                try:
+                    return out.astype(float)
+                except Exception:
+                    pass
+            return out
+        elif all(_is_numeric_scalar(v) for v in non_nan):
+            if _can_safely_cast_to_float(non_nan):
+                try:
+                    return out.astype(float)
+                except Exception:
+                    pass
+            return out
         elif all(isinstance(v, str) for v in non_nan):
             str_out = np.empty(arr.shape, dtype=object)
             for idx, val in np.ndenumerate(out):
@@ -1202,10 +1232,23 @@ def _dict_reliability_data_to_value_counts(
 def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
     """Extract unique non-missing values from reliability data."""
     kind = reliability_data.dtype.kind
-    if kind in {"i", "u", "f"}:
+    if kind in {"i", "u"}:
+        return np.unique(reliability_data)
+    elif kind == "f":
         return np.unique(reliability_data[~np.isnan(reliability_data)])
     elif kind in {"U", "S"}:
         return np.unique(reliability_data[reliability_data != "nan"])
+    elif kind == "O":
+        non_missing = [v for v in reliability_data.flat if not _is_missing(v)]
+        if len(non_missing) > 0 and (
+            all(_is_numeric_scalar(v) for v in non_missing) or all(isinstance(v, (str, bytes)) for v in non_missing)
+        ):
+            unique_vals = list(dict.fromkeys(non_missing))
+            try:
+                unique_vals = sorted(unique_vals)
+            except TypeError:
+                pass
+            return _to_domain_array(unique_vals)
     raise ValueError(f"Don't know how to construct value domain for dtype kind {kind}.")
 
 
@@ -1218,11 +1261,8 @@ def _extract_table_columns(
         or hasattr(table, "columns")
         or (hasattr(table, "dtype") and getattr(table.dtype, "names", None) is not None)
     )
-    if is_column_accessible and hasattr(table, "__getitem__"):
-        try:
-            return list(table[coder_col]), list(table[unit_col]), list(table[value_col])
-        except (KeyError, TypeError, IndexError):
-            pass
+    if is_column_accessible:
+        return list(table[coder_col]), list(table[unit_col]), list(table[value_col])
     return (
         [row[coder_col] for row in table],
         [row[unit_col] for row in table],
@@ -1441,7 +1481,12 @@ def _prepare_data_and_domain(  # noqa: C901
             if all_reliability_data is not None:
                 assert all_rel_arr is not None
                 all_computed_domain = _domain_from_reliability_data(all_rel_arr)
-                combined_computed_domain = np.unique(np.concatenate([computed_value_domain, all_computed_domain]))
+                combined_vals = list(dict.fromkeys(list(computed_value_domain) + list(all_computed_domain)))
+                try:
+                    combined_vals = sorted(combined_vals)
+                except TypeError:
+                    pass
+                combined_computed_domain = _to_domain_array(combined_vals)
             else:
                 combined_computed_domain = computed_value_domain
 
