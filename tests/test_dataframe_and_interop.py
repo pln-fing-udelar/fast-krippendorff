@@ -1068,3 +1068,50 @@ def test_numeric_ratings_subsample_skips_reference_scan() -> None:
     ref = np.array([[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]])
     res = alpha(sample, all_reliability_data=ref, level_of_measurement="interval")
     assert np.isclose(res, 1.0)
+
+
+def test_integer_downcast_preserves_precision_with_large_domain() -> None:
+    # Copilot review finding (discussion_r4278867396):
+    # Downcasting object ratings [[0, B], [0, B]] to signed int when domain is np.uint64 [0, B, B + 1] (B = 2**53)
+    # causes float64 promotion during comparison, collapsing B and B + 1 and yielding nominal alpha = 4/9 instead of
+    # 1.0. Preserve exact comparisons against the domain and reference data.
+    b_val = 2**53
+    ratings = np.array([[0, b_val], [0, b_val]], dtype=object)
+    domain = np.array([0, b_val, b_val + 1], dtype=np.uint64)
+
+    res_alpha = alpha(ratings, value_domain=domain, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0)
+
+    res_ci = bootstrap_ci(ratings, value_domain=domain, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0)
+    assert np.isclose(res_ci.confidence_interval[0], 1.0)
+    assert np.isclose(res_ci.confidence_interval[1], 1.0)
+
+    # Subsample reference data with large integers
+    all_ratings = np.array([[0, b_val, b_val + 1], [0, b_val, b_val + 1]], dtype=np.uint64)
+    res_subsample_alpha = alpha(ratings, all_reliability_data=all_ratings, level_of_measurement="nominal")
+    assert np.isclose(res_subsample_alpha, 1.0)
+
+    res_subsample_ci = bootstrap_ci(
+        ratings, all_reliability_data=all_ratings, level_of_measurement="nominal", random_state=42
+    )
+    assert np.isclose(res_subsample_ci.alpha, 1.0)
+
+
+def test_string_object_array_retains_object_dtype_avoiding_unicode_blowup() -> None:
+    # Copilot review finding:
+    # Converting object-backed string ratings to fixed-width Unicode reserves space for the longest label
+    # in every cell, causing severe memory blowup for long strings. Retain object array.
+    long_label = "x" * 1000
+    ratings = np.array([[long_label, "short"], [long_label, "short"]], dtype=object)
+
+    from krippendorff.krippendorff import _clean_object_array
+
+    cleaned = _clean_object_array(ratings)
+    assert cleaned.dtype == object
+
+    res_alpha = alpha(ratings, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0)
+
+    res_ci = bootstrap_ci(ratings, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0)

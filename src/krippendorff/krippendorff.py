@@ -966,7 +966,15 @@ def _reliability_data_to_value_counts(
         Number of coders that assigned a certain value to a determined unit, where N is the number of units
         and V is the value count.
     """
-    return (reliability_data.T[..., np.newaxis] == value_domain[np.newaxis, np.newaxis, :]).sum(axis=1)
+    rd = reliability_data.T[..., np.newaxis]
+    vd = value_domain[np.newaxis, np.newaxis, :]
+    if (
+        np.issubdtype(reliability_data.dtype, np.integer)
+        and np.issubdtype(value_domain.dtype, np.integer)
+        and np.issubdtype(np.result_type(reliability_data.dtype, value_domain.dtype), np.floating)
+    ):
+        return (rd.astype(object) == vd.astype(object)).sum(axis=1)
+    return (rd == vd).sum(axis=1)
 
 
 def _is_dict_reliability_data(data: Any) -> bool:
@@ -1065,16 +1073,16 @@ def _clean_object_array(arr: npt.NDArray, extra_vals: Sequence[Any] | None = Non
     vals_to_check = non_nan if extra_vals is None else non_nan + [v for v in extra_vals if not _is_missing(v)]
     if len(non_nan) > 0:
         if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in non_nan):
-            # If all are integers and there are no NaNs, try integer downcasting if it doesn't overflow or alter values
-            if not any(isinstance(v, float) and np.isnan(v) for v in out.flat):
-                try:
-                    int_arr = out.astype(int)
-                    if all(int_arr[idx] == out[idx] for idx, _ in np.ndenumerate(out)):
-                        return int_arr
-                except Exception:
-                    pass
-            # If there are NaNs or large integers, only downcast to float if every integer is preserved exactly
+            # Only downcast to integer or float if every value (including domain and reference data in vals_to_check)
+            # can be safely represented without loss of precision or float promotion collisions (e.g. abs(v) < 2**53).
             if _can_safely_cast_to_float(vals_to_check):
+                if not any(isinstance(v, float) and np.isnan(v) for v in out.flat):
+                    try:
+                        int_arr = out.astype(int)
+                        if all(int_arr[idx] == out[idx] for idx, _ in np.ndenumerate(out)):
+                            return int_arr
+                    except Exception:
+                        pass
                 try:
                     return out.astype(float)
                 except Exception:
@@ -1088,11 +1096,7 @@ def _clean_object_array(arr: npt.NDArray, extra_vals: Sequence[Any] | None = Non
                     pass
             return out
         elif all(isinstance(v, str) for v in non_nan):
-            if not any(isinstance(v, float) and np.isnan(v) for v in out.flat) and "nan" not in non_nan:
-                try:
-                    return out.astype(str)
-                except Exception:
-                    pass
+            # Retain object array for strings to avoid fixed-width Unicode memory blowup
             return out
     return out
 
@@ -1438,7 +1442,7 @@ def _prepare_data_and_domain(  # noqa: C901
                 raise ValueError("The reliability data contains out-of-domain values.")
             if all_rel_arr is not None:
                 all_computed_domain = _domain_from_reliability_data(all_rel_arr)
-                if not np.isin(all_computed_domain, effective_domain).all():
+                if not set(all_computed_domain).issubset(domain_set):
                     raise ValueError("The reference reliability data contains out-of-domain values.")
         else:
             distinct_table_v = list(dict.fromkeys(table_valid_v))
@@ -1526,9 +1530,10 @@ def _prepare_data_and_domain(  # noqa: C901
                 res_domain = combined_computed_domain
             else:
                 res_domain = _to_domain_array(value_domain)
-                if not np.isin(computed_value_domain, res_domain).all():
+                res_domain_set = set(res_domain)
+                if not set(computed_value_domain).issubset(res_domain_set):
                     raise ValueError("The reliability data contains out-of-domain values.")
-                if all_rel_arr is not None and not np.isin(all_computed_domain, res_domain).all():
+                if all_rel_arr is not None and not set(all_computed_domain).issubset(res_domain_set):
                     raise ValueError("The reference reliability data contains out-of-domain values.")
 
             res_counts = _reliability_data_to_value_counts(rel_arr, res_domain)
