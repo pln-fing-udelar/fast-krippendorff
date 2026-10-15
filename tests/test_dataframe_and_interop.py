@@ -912,3 +912,40 @@ def test_preserve_missing_sentinels_with_string_nan_category() -> None:
 
     res_ci = bootstrap_ci(data, value_domain=domain, level_of_measurement="nominal", random_state=42)
     assert np.isclose(res_ci.alpha, 0.4)
+
+
+def test_preserve_literal_nan_string_inferred_domain_object_array() -> None:
+    # Copilot review finding (discussion_r4278635337):
+    # Downcasting a string object array to Unicode changes how the literal "nan" label is handled:
+    # _domain_from_reliability_data excludes "nan" from Unicode arrays but preserves it in object arrays.
+    # Without an explicit domain or missing values, np.array([["nan", "yes"], ["nan", "no"]], dtype=object)
+    # must retain object dtype and infer domain ["nan", "no", "yes"], yielding nominal alpha 0.4 instead of 0.0.
+    data = np.array([["nan", "yes"], ["nan", "no"]], dtype=object)
+
+    res_alpha = alpha(data, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 0.4)
+
+    res_ci = bootstrap_ci(data, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 0.4)
+
+    # Wide DataFrame returning object array with "nan" string labels
+    class MockWideDF:
+        def __init__(self, arr: np.ndarray) -> None:
+            self._arr = arr
+
+        def to_numpy(self) -> np.ndarray:
+            return self._arr
+
+    df_obj = MockWideDF(data)
+    res_df = alpha(df_obj, level_of_measurement="nominal")
+    assert np.isclose(res_df, 0.4)
+
+    res_df_ci = bootstrap_ci(df_obj, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_df_ci.alpha, 0.4)
+
+    # Adding an all-missing unit to the object array must not change the alpha of valid units
+    data_with_missing_unit = np.array([["nan", "yes", None], ["nan", "no", None]], dtype=object)
+    res_with_missing = alpha(data_with_missing_unit, level_of_measurement="nominal")
+    assert np.isclose(res_with_missing, 0.4)
+    res_with_missing_ci = bootstrap_ci(data_with_missing_unit, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_with_missing_ci.alpha, 0.4)

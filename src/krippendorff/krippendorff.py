@@ -1077,7 +1077,7 @@ def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:  # noqa: C901
                     pass
             return out
         elif all(isinstance(v, str) for v in non_nan):
-            if not any(isinstance(v, float) and np.isnan(v) for v in out.flat):
+            if not any(isinstance(v, float) and np.isnan(v) for v in out.flat) and "nan" not in non_nan:
                 try:
                     return out.astype(str)
                 except Exception:
