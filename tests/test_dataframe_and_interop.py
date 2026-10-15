@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
@@ -768,3 +768,91 @@ def test_bootstrap_ci_with_reference_matrix_and_coders_axis_columns() -> None:
     assert np.isclose(res_rows.confidence_interval[0], res_cols.confidence_interval[0])
     assert np.isclose(res_rows.confidence_interval[1], res_cols.confidence_interval[1])
     assert np.isclose(res_rows.standard_error, res_cols.standard_error)
+
+
+def test_table_and_dict_uncovered_error_branches() -> None:
+    # 1. No valid units in table
+    with pytest.raises(ValueError, match=re.escape("No valid units found in the table.")):
+        table_to_value_counts(
+            {"coder": [1, 2], "unit": [None, np.nan], "value": [10, 20]},
+            coder_col="coder",
+            unit_col="unit",
+            value_col="value",
+        )
+
+    # 2. No valid ratings in table passed to alpha
+    with pytest.raises(ValueError, match=re.escape("No valid non-missing ratings found in the table.")):
+        alpha(
+            {"coder": ["c1"], "unit": ["u1"], "value": [None]},
+            coder_col="coder",
+            unit_col="unit",
+            value_col="value",
+        )
+
+    # 3. Empty table passed to alpha
+    with pytest.raises(ValueError, match=re.escape("The provided table is empty.")):
+        alpha(
+            {"coder": [], "unit": [], "value": []},
+            coder_col="coder",
+            unit_col="unit",
+            value_col="value",
+        )
+
+    # 4. Unequal length columns passed to alpha
+    with pytest.raises(
+        ValueError, match=re.escape("Columns coder_col, unit_col, and value_col must all have the same length.")
+    ):
+        alpha(
+            {"coder": ["c1"], "unit": ["u1", "u2"], "value": [1]},
+            coder_col="coder",
+            unit_col="unit",
+            value_col="value",
+        )
+
+    # 5. Table out-of-domain with explicit value_domain in alpha
+    with pytest.raises(ValueError, match=re.escape("The reliability data contains out-of-domain values.")):
+        alpha(
+            {"coder": [1, 2], "unit": ["u1", "u1"], "value": [1, 99]},
+            coder_col="coder",
+            unit_col="unit",
+            value_col="value",
+            value_domain=[1, 2],
+        )
+
+    # 6. Reference data out-of-domain with explicit value_domain in table alpha
+    with pytest.raises(ValueError, match=re.escape("The reference reliability data contains out-of-domain values.")):
+        alpha(
+            {"coder": [1, 2], "unit": ["u1", "u1"], "value": [1, 2]},
+            coder_col="coder",
+            unit_col="unit",
+            value_col="value",
+            value_domain=[1, 2],
+            all_reliability_data=[[1, 99], [2, 99]],
+        )
+
+    # 7. Dict reliability data with out-of-domain values
+    with pytest.raises(ValueError, match=re.escape("The reliability data contains out-of-domain values.")):
+        alpha(
+            [{"u1": 1, "u2": 2}, {"u1": 1, "u2": 99}],
+            value_domain=[1, 2],
+        )
+
+    # 8. Column-accessible table whose __getitem__ raises KeyError falls back to row iteration
+    class TableWithBrokenGetitem:
+        columns: ClassVar[list[str]] = ["coder", "unit", "value"]
+
+        def __getitem__(self, key: Any) -> Any:
+            raise KeyError(key)
+
+        def __iter__(self) -> Any:
+            return iter(
+                [
+                    {"coder": "c1", "unit": "u1", "value": 1},
+                    {"coder": "c2", "unit": "u1", "value": 1},
+                    {"coder": "c1", "unit": "u2", "value": 2},
+                    {"coder": "c2", "unit": "u2", "value": 2},
+                ]
+            )
+
+    res = alpha_table(TableWithBrokenGetitem(), coder_col="coder", unit_col="unit", value_col="value")
+    assert np.isclose(res, 1.0)
