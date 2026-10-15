@@ -1023,25 +1023,31 @@ def _to_numpy_array(data: Any, dtype: Any = None) -> npt.NDArray:
         and len(data) > 0
         and all(isinstance(v, (list, tuple, np.ndarray)) or hasattr(v, "__iter__") for v in data.values())
     ):
-        data = np.asarray(list(data.values())).T
+        data = np.asarray([list(v) for v in data.values()], dtype=object).T
     else:
         data = np.asarray(data)
     return np.asarray(data, dtype=dtype) if dtype is not None else np.asarray(data)
 
 
 def _can_safely_cast_to_float(vals: Sequence[Any]) -> bool:
-    """Check if all numeric values can be converted to float without losing integer precision."""
+    """Check if all numeric values can be converted to float without losing precision or distinctness."""
     for v in vals:
         if isinstance(v, (int, np.integer)) and not isinstance(v, bool):
             try:
-                if int(float(v)) != v:
+                if abs(v) >= (1 << 53) or int(float(v)) != v:
+                    return False
+            except (OverflowError, ValueError):
+                return False
+        elif isinstance(v, (float, np.floating)):
+            try:
+                if not np.isnan(v) and float(v) != v:
                     return False
             except (OverflowError, ValueError):
                 return False
     return True
 
 
-def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:  # noqa: C901
+def _clean_object_array(arr: npt.NDArray, extra_vals: Sequence[Any] | None = None) -> npt.NDArray:  # noqa: C901
     """Normalize object ndarray by replacing missing sentinels with NaN and downcasting numeric arrays when safe."""
     if arr.dtype != object:
         return arr
@@ -1052,6 +1058,7 @@ def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:  # noqa: C901
         else:
             out[idx] = val
     non_nan = [v for v in out.flat if not (isinstance(v, float) and np.isnan(v))]
+    vals_to_check = non_nan if extra_vals is None else non_nan + [v for v in extra_vals if not _is_missing(v)]
     if len(non_nan) > 0:
         if all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) for v in non_nan):
             # If all are integers and there are no NaNs, try integer downcasting if it doesn't overflow or alter values
@@ -1063,14 +1070,14 @@ def _clean_object_array(arr: npt.NDArray) -> npt.NDArray:  # noqa: C901
                 except Exception:
                     pass
             # If there are NaNs or large integers, only downcast to float if every integer is preserved exactly
-            if _can_safely_cast_to_float(non_nan):
+            if _can_safely_cast_to_float(vals_to_check):
                 try:
                     return out.astype(float)
                 except Exception:
                     pass
             return out
         elif all(_is_numeric_scalar(v) for v in non_nan):
-            if _can_safely_cast_to_float(non_nan):
+            if _can_safely_cast_to_float(vals_to_check):
                 try:
                     return out.astype(float)
                 except Exception:
@@ -1394,7 +1401,8 @@ def _prepare_data_and_domain(  # noqa: C901
             all_rel_arr = all_rel_arr.T
         elif coders_axis not in (0, "rows", "row"):
             raise ValueError(f"Invalid coders_axis {coders_axis!r}. Expected 0, 1, 'rows', or 'columns'.")
-        all_rel_arr = _clean_object_array(all_rel_arr)
+        extra_domain_vals = list(_to_domain_array(value_domain)) if value_domain is not None else None
+        all_rel_arr = _clean_object_array(all_rel_arr, extra_vals=extra_domain_vals)
 
     if coder_col is not None or unit_col is not None or value_col is not None:
         if not (coder_col is not None and unit_col is not None and value_col is not None):
@@ -1474,7 +1482,10 @@ def _prepare_data_and_domain(  # noqa: C901
                 rel_arr = rel_arr.T
             elif coders_axis not in (0, "rows", "row"):
                 raise ValueError(f"Invalid coders_axis {coders_axis!r}. Expected 0, 1, 'rows', or 'columns'.")
-            rel_arr = _clean_object_array(rel_arr)
+            extra_vals: list[Any] = list(_to_domain_array(value_domain)) if value_domain is not None else []
+            if all_rel_arr is not None:
+                extra_vals = extra_vals + [v for v in all_rel_arr.flat if not _is_missing(v)]
+            rel_arr = _clean_object_array(rel_arr, extra_vals=extra_vals if extra_vals else None)
             computed_value_domain = _domain_from_reliability_data(rel_arr)
 
             if all_reliability_data is not None:

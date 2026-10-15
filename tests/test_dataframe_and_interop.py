@@ -949,3 +949,53 @@ def test_preserve_literal_nan_string_inferred_domain_object_array() -> None:
     assert np.isclose(res_with_missing, 0.4)
     res_with_missing_ci = bootstrap_ci(data_with_missing_unit, level_of_measurement="nominal", random_state=42)
     assert np.isclose(res_with_missing_ci.alpha, 0.4)
+
+
+def test_preserve_wide_integer_labels_in_mapping_input() -> None:
+    # Copilot review finding (discussion_r4278700654):
+    # Mapping with wide columns {'c1': [-1, 2**63, 2**63 + 1], 'c2': [-1, 2**63 + 1, 2**63]}
+    # must construct an object array first so large integers are not coerced to float64,
+    # which would merge 2**63 and 2**63 + 1. Nominal alpha with coders_axis='columns'
+    # must be 1/6 (not 1.0).
+    data = {"c1": [-1, 2**63, 2**63 + 1], "c2": [-1, 2**63 + 1, 2**63]}
+    res_alpha = alpha(data, coders_axis="columns", level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0 / 6.0)
+
+    res_ci = bootstrap_ci(data, coders_axis="columns", level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0 / 6.0)
+
+
+def test_preserve_extended_precision_floats_object_array() -> None:
+    # Copilot review finding (discussion_r4278700684):
+    # On platforms where np.longdouble has higher precision than float64,
+    # object arrays with ratings [[0, a, b], [0, b, a]] (where b = a + eps)
+    # must retain object dtype so a and b are not merged into the same float64.
+    if np.finfo(np.longdouble).precision <= np.finfo(np.float64).precision:
+        pytest.skip("Platform does not support extended precision longdouble.")
+
+    a = np.longdouble(1)
+    eps = np.finfo(np.longdouble).eps
+    b = a + eps
+    data = np.array([[0, a, b], [0, b, a]], dtype=object)
+
+    res_alpha = alpha(data, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0 / 6.0)
+
+    res_ci = bootstrap_ci(data, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0 / 6.0)
+
+
+def test_prevent_float64_coercion_merging_large_integer_domain_values() -> None:
+    # Copilot review finding (discussion_r4278700709):
+    # For B = 2**53, nullable integer ratings [[0, B, None], [0, B, None]] with domain [0, B, B + 1]
+    # must not be converted to float64, which would cause B in ratings to match both B and B + 1
+    # in the domain and produce alpha = 4/9 instead of 1.0.
+    b_val = 2**53
+    data = np.array([[0, b_val, None], [0, b_val, None]], dtype=object)
+    domain = [0, b_val, b_val + 1]
+
+    res_alpha = alpha(data, value_domain=domain, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0)
+
+    res_ci = bootstrap_ci(data, value_domain=domain, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_ci.alpha, 1.0)
