@@ -1170,3 +1170,34 @@ def test_bootstrap_ci_reusable_iterator_reference_inputs() -> None:
         sample, random_coincidences=rand_coinc_iter, level_of_measurement="nominal", random_state=42
     )
     assert np.isclose(res_boot_rc.alpha, 1.0)
+
+
+def test_table_with_record_iterator() -> None:
+    # Copilot review finding:
+    # Single-pass traversal in _extract_table_columns handles one-shot record iterators
+    # in table_to_value_counts(), alpha_table(), and bootstrap_ci_table().
+    records = [
+        {"coder": "c1", "unit": "u1", "val": 1},
+        {"coder": "c2", "unit": "u1", "val": 1},
+        {"coder": "c1", "unit": "u2", "val": 2},
+        {"coder": "c2", "unit": "u2", "val": 2},
+    ]
+
+    vc, dom = table_to_value_counts(iter(records), coder_col="coder", unit_col="unit", value_col="val")
+    assert np.array_equal(vc, [[2, 0], [0, 2]])
+    assert np.array_equal(dom, [1, 2])
+
+    res_alpha = alpha_table(
+        iter(records), coder_col="coder", unit_col="unit", value_col="val", level_of_measurement="nominal"
+    )
+    assert np.isclose(res_alpha, 1.0)
+
+    res_ci = bootstrap_ci_table(
+        iter(records),
+        coder_col="coder",
+        unit_col="unit",
+        value_col="val",
+        level_of_measurement="nominal",
+        random_state=42,
+    )
+    assert np.isclose(res_ci.alpha, 1.0)

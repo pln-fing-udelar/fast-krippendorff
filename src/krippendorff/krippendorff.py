@@ -1275,11 +1275,14 @@ def _extract_table_columns(
     )
     if is_column_accessible:
         return list(table[coder_col]), list(table[unit_col]), list(table[value_col])
-    return (
-        [row[coder_col] for row in table],
-        [row[unit_col] for row in table],
-        [row[value_col] for row in table],
-    )
+    c_list: list[Any] = []
+    u_list: list[Any] = []
+    v_list: list[Any] = []
+    for row in table:
+        c_list.append(row[coder_col])
+        u_list.append(row[unit_col])
+        v_list.append(row[value_col])
+    return c_list, u_list, v_list
 
 
 def table_to_value_counts(  # noqa: C901
