@@ -1153,3 +1153,20 @@ def test_object_arrays_normalized_in_count_input_paths() -> None:
     assert np.isclose(
         bootstrap_ci(sample, all_value_counts=df_vc, level_of_measurement="nominal", random_state=42).alpha, 1.0
     )
+
+
+def test_bootstrap_ci_reusable_iterator_reference_inputs() -> None:
+    # Copilot review finding (discussion_r4279006146):
+    # Materialize iterator-backed reference inputs (all_value_counts and random_coincidences)
+    # once in bootstrap_ci() so they are not exhausted when reused for expected coincidences and distance calculations.
+    sample = [[0, 1], [0, 1]]
+    all_vc_iter = {"a": iter([2, 0]), "b": iter([0, 2])}
+    res_boot_vc = bootstrap_ci(sample, all_value_counts=all_vc_iter, level_of_measurement="nominal", random_state=42)
+    assert np.isclose(res_boot_vc.alpha, 1.0)
+
+    # Iterator-backed random_coincidences mapping
+    rand_coinc_iter = {"col1": iter([1.0, 1.0]), "col2": iter([1.0, 1.0])}
+    res_boot_rc = bootstrap_ci(
+        sample, random_coincidences=rand_coinc_iter, level_of_measurement="nominal", random_state=42
+    )
+    assert np.isclose(res_boot_rc.alpha, 1.0)

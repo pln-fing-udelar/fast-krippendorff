@@ -1381,7 +1381,7 @@ def _prepare_data_and_domain(  # noqa: C901
     level_of_measurement: LevelOfMeasurement = "interval",
     all_reliability_data: Any = None,
     all_value_counts: Any = None,
-    random_coincidences: npt.ArrayLike | None = None,
+    random_coincidences: Any = None,
     coders_axis: CodersAxis = "rows",
     coder_col: Any = None,
     unit_col: Any = None,
@@ -1567,7 +1567,7 @@ def _compute_expected_coincidences(  # noqa: C901
     dtype: np.dtype,
     all_rel_arr: npt.NDArray | None,
     all_value_counts: Any,
-    random_coincidences: npt.ArrayLike | None,
+    random_coincidences: Any,
 ) -> tuple[npt.NDArray, npt.NDArray, bool]:
     """Compute expected coincidence matrix e, marginal counts for distances dist_n_v, and reference flag."""
     if all_rel_arr is not None:
@@ -1639,7 +1639,7 @@ def alpha(
     value_col: Any = ...,
     all_reliability_data: Any = ...,
     all_value_counts: Any = ...,
-    random_coincidences: npt.ArrayLike | None = ...,
+    random_coincidences: Any = ...,
     return_components: Literal[False] = ...,
 ) -> float: ...
 
@@ -1658,7 +1658,7 @@ def alpha(
     value_col: Any = ...,
     all_reliability_data: Any = ...,
     all_value_counts: Any = ...,
-    random_coincidences: npt.ArrayLike | None = ...,
+    random_coincidences: Any = ...,
     return_components: Literal[False] = ...,
 ) -> float | complex | np.inexact: ...
 
@@ -1677,7 +1677,7 @@ def alpha(
     value_col: Any = ...,
     all_reliability_data: Any = ...,
     all_value_counts: Any = ...,
-    random_coincidences: npt.ArrayLike | None = ...,
+    random_coincidences: Any = ...,
     return_components: Literal[True],
 ) -> AlphaResult[Any]: ...
 
@@ -1696,7 +1696,7 @@ def alpha(
     value_col: Any = ...,
     all_reliability_data: Any = ...,
     all_value_counts: Any = ...,
-    random_coincidences: npt.ArrayLike | None = ...,
+    random_coincidences: Any = ...,
     return_components: bool,
 ) -> float | complex | np.inexact | AlphaResult[Any]: ...
 
@@ -1714,7 +1714,7 @@ def alpha(
     value_col: Any = None,
     all_reliability_data: Any = None,
     all_value_counts: Any = None,
-    random_coincidences: npt.ArrayLike | None = None,
+    random_coincidences: Any = None,
     return_components: bool = False,
 ) -> Any:
     """Compute Krippendorff's alpha.
@@ -1917,7 +1917,7 @@ def alpha_table(
     value_domain: npt.ArrayLike | None = None,
     all_reliability_data: Any = None,
     all_value_counts: Any = None,
-    random_coincidences: npt.ArrayLike | None = None,
+    random_coincidences: Any = None,
     return_components: bool = False,
 ) -> Any:
     """Compute Krippendorff's alpha from a long/tidy tabular dataset.
@@ -2219,7 +2219,7 @@ def bootstrap_ci(  # noqa: C901
     random_state: int | np.random.Generator | np.random.RandomState | None = None,
     all_reliability_data: Any = None,
     all_value_counts: Any = None,
-    random_coincidences: npt.ArrayLike | None = None,
+    random_coincidences: Any = None,
     return_distribution: bool = False,
     coders_axis: CodersAxis = "rows",
     coder_col: Any = None,
@@ -2344,6 +2344,15 @@ def bootstrap_ci(  # noqa: C901
         np.iscomplexobj(domain) or any(isinstance(v, (complex, np.complexfloating)) for v in domain)
     ):
         raise ValueError(f"Level of measurement {level_of_measurement!r} does not support complex values.")
+
+    if all_value_counts is not None:
+        all_counts = _to_numpy_array(all_value_counts)
+        if all_counts.dtype == object:
+            all_counts = _clean_object_array(all_counts)
+        all_value_counts = all_counts
+
+    if random_coincidences is not None:
+        random_coincidences = _to_numpy_array(random_coincidences, dtype=dtype)
 
     obs_res = alpha(
         value_counts=counts,
@@ -2539,7 +2548,7 @@ def bootstrap_ci_table(
     all_reliability_data: Any = None,
     all_value_counts: Any = None,
     random_state: int | np.random.Generator | np.random.RandomState | None = None,
-    random_coincidences: npt.ArrayLike | None = None,
+    random_coincidences: Any = None,
     return_distribution: bool = False,
     dtype: npt.DTypeLike = DEFAULT_DTYPE,
     *,
