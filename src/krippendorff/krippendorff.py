@@ -199,7 +199,14 @@ def _interval_metric(
     dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Metric for interval data."""
-    return (v1 - v2).astype(dtype) ** 2  # ty:ignore[unsupported-operator]
+    if np.issubdtype(v1.dtype, np.integer) or np.issubdtype(v2.dtype, np.integer):
+        diff = (v1.astype(object) - v2.astype(object)).astype(dtype)
+    elif np.issubdtype(v1.dtype, np.floating) and np.issubdtype(v2.dtype, np.floating):
+        calc_dtype = np.float64 if np.dtype(dtype).itemsize < 8 and np.issubdtype(dtype, np.floating) else dtype
+        diff = (v1.astype(calc_dtype) - v2.astype(calc_dtype)).astype(dtype)
+    else:
+        diff = (v1 - v2).astype(dtype)  # ty:ignore[unsupported-operator]
+    return diff**2
 
 
 def _ratio_metric(
@@ -211,9 +218,28 @@ def _ratio_metric(
     dtype: np.dtype[MetricResultScalarType] = DEFAULT_DTYPE,  # ty:ignore[invalid-parameter-default]
 ) -> npt.NDArray[MetricResultScalarType]:
     """Metric for ratio data."""
-    v1_plus_v2 = v1 + v2  # ty:ignore[unsupported-operator]
+    if np.issubdtype(v1.dtype, np.integer) or np.issubdtype(v2.dtype, np.integer):
+        v1_obj = v1.astype(object)
+        v2_obj = v2.astype(object)
+        diff = (v1_obj - v2_obj).astype(dtype)
+        v1_plus_v2 = (v1_obj + v2_obj).astype(dtype)
+    elif np.issubdtype(v1.dtype, np.floating) and np.issubdtype(v2.dtype, np.floating):
+        calc_dtype = np.float64 if np.dtype(dtype).itemsize < 8 and np.issubdtype(dtype, np.floating) else dtype
+        v1_c = v1.astype(calc_dtype)
+        v2_c = v2.astype(calc_dtype)
+        diff = (v1_c - v2_c).astype(dtype)
+        v1_plus_v2 = (v1_c + v2_c).astype(dtype)
+    else:
+        diff = (v1 - v2).astype(dtype)  # ty:ignore[unsupported-operator]
+        v1_plus_v2 = v1 + v2  # ty:ignore[unsupported-operator]
     return (
-        np.divide(v1 - v2, v1_plus_v2, out=np.zeros(np.broadcast(v1, v2).shape), where=v1_plus_v2 != 0, dtype=dtype)  # ty:ignore[unsupported-operator]
+        np.divide(
+            diff,
+            v1_plus_v2,
+            out=np.zeros(np.broadcast(v1, v2).shape, dtype=dtype),
+            where=v1_plus_v2 != 0,
+            dtype=dtype,
+        )
         ** 2
     )
 
@@ -1199,6 +1225,8 @@ def _to_domain_array(domain_values: Any) -> npt.NDArray:  # noqa: C901
         if hasattr(domain_values, "__iter__") and not isinstance(domain_values, (str, bytes))
         else list(np.asarray(domain_values))
     )
+    if all(isinstance(v, (float, np.floating)) for v in domain_list):
+        return np.asarray(domain_values)
     domain_list = [_normalize_scalar(v) for v in domain_list]
     if all(isinstance(v, bool) for v in domain_list):
         return np.asarray(domain_list, dtype=bool)
@@ -1264,7 +1292,7 @@ def _domain_from_raw_values(
     level_of_measurement: LevelOfMeasurement,
 ) -> npt.NDArray:
     """Compute and validate the value domain from extracted mapping values."""
-    unique_vals = [_normalize_scalar(v) for v in dict.fromkeys(distinct_values)]
+    unique_vals = list(dict.fromkeys(_normalize_scalar(v) for v in distinct_values))
     try:
         unique_vals = sorted(unique_vals)
     except TypeError:
@@ -1322,8 +1350,9 @@ def _dict_reliability_data_to_value_counts(
     coder_dicts = _extract_coder_dicts(data)
 
     units = list(dict.fromkeys(u for d in coder_dicts for u in d.keys()))
-    distinct_values = [_normalize_scalar(v) for d in coder_dicts for v in d.values() if not _is_missing(v)]
-    distinct_values = list(dict.fromkeys(distinct_values))
+    distinct_values = list(
+        dict.fromkeys(_normalize_scalar(v) for d in coder_dicts for v in d.values() if not _is_missing(v))
+    )
     domain_arr = _domain_from_raw_values(distinct_values, value_domain, level_of_measurement)
 
     unit_to_idx = {u: i for i, u in enumerate(units)}
@@ -1352,11 +1381,10 @@ def _domain_from_reliability_data(reliability_data: npt.NDArray) -> npt.NDArray:
     elif kind in {"U", "S"}:
         return np.unique(reliability_data[reliability_data != "nan"])
     elif kind == "O":
-        non_missing = [_normalize_scalar(v) for v in reliability_data.flat if not _is_missing(v)]
-        if len(non_missing) > 0 and all(
-            _is_numeric_scalar(v) or isinstance(v, (str, bytes, bool)) for v in non_missing
+        unique_vals = list(dict.fromkeys(_normalize_scalar(v) for v in reliability_data.flat if not _is_missing(v)))
+        if len(unique_vals) > 0 and all(
+            _is_numeric_scalar(v) or isinstance(v, (str, bytes, bool)) for v in unique_vals
         ):
-            unique_vals = list(dict.fromkeys(non_missing))
             try:
                 unique_vals = sorted(unique_vals)
             except TypeError:

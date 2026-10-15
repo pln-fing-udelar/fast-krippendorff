@@ -1435,3 +1435,71 @@ def test_avoid_reference_sized_allocations_for_object_sample() -> None:
     res = alpha(sample, all_reliability_data=large_ref, level_of_measurement="nominal")
     assert isinstance(res, float)
     assert not np.isnan(res)
+
+
+def test_prevent_overflow_when_normalizing_integral_floating_point_domains() -> None:
+    # Copilot review finding (discussion_r4279405240):
+    # Signed floating point domain case:
+    # ratings [[-5e18, 0.0, 5e18], [-5e18, 5e18, 0.0]] with value_domain=[-5e18, 0.0, 5e18]
+    # must not overflow int64 subtraction; expected alpha is 7/12.
+    ratings_signed_f = [[-5e18, 0.0, 5e18], [-5e18, 5e18, 0.0]]
+    domain_signed_f = [-5e18, 0.0, 5e18]
+    alpha_signed_f = alpha(ratings_signed_f, value_domain=domain_signed_f, level_of_measurement="interval")
+    assert np.isclose(alpha_signed_f, 7.0 / 12.0)
+
+    ci_signed_f = bootstrap_ci(
+        ratings_signed_f, value_domain=domain_signed_f, level_of_measurement="interval", n_resamples=10, random_state=42
+    )
+    assert np.isclose(ci_signed_f.alpha, 7.0 / 12.0)
+
+    # Native int64 array case
+    domain_i64 = np.array([-5_000_000_000_000_000_000, 0, 5_000_000_000_000_000_000], dtype=np.int64)
+    ratings_i64 = np.array(
+        [
+            [-5_000_000_000_000_000_000, 0, 5_000_000_000_000_000_000],
+            [-5_000_000_000_000_000_000, 5_000_000_000_000_000_000, 0],
+        ],
+        dtype=np.int64,
+    )
+    assert np.isclose(alpha(ratings_i64, value_domain=domain_i64, level_of_measurement="interval"), 7.0 / 12.0)
+
+    # Unsigned floating point domain case:
+    # ratings [[1e19, 1.25e19, 1.5e19], [1e19, 1.5e19, 1.25e19]] with value_domain=[1e19, 1.25e19, 1.5e19]
+    # must not wrap in uint64; expected alpha is 7/12.
+    ratings_unsigned_f = [[1e19, 1.25e19, 1.5e19], [1e19, 1.5e19, 1.25e19]]
+    domain_unsigned_f = [1e19, 1.25e19, 1.5e19]
+    alpha_unsigned_f = alpha(ratings_unsigned_f, value_domain=domain_unsigned_f, level_of_measurement="interval")
+    assert np.isclose(alpha_unsigned_f, 7.0 / 12.0)
+
+    ci_unsigned_f = bootstrap_ci(
+        ratings_unsigned_f,
+        value_domain=domain_unsigned_f,
+        level_of_measurement="interval",
+        n_resamples=10,
+        random_state=42,
+    )
+    assert np.isclose(ci_unsigned_f.alpha, 7.0 / 12.0)
+
+    # Native uint64 array case
+    domain_u64 = np.array(
+        [10_000_000_000_000_000_000, 12_500_000_000_000_000_000, 15_000_000_000_000_000_000], dtype=np.uint64
+    )
+    ratings_u64 = np.array(
+        [
+            [10_000_000_000_000_000_000, 12_500_000_000_000_000_000, 15_000_000_000_000_000_000],
+            [10_000_000_000_000_000_000, 15_000_000_000_000_000_000, 12_500_000_000_000_000_000],
+        ],
+        dtype=np.uint64,
+    )
+    assert np.isclose(alpha(ratings_u64, value_domain=domain_u64, level_of_measurement="interval"), 7.0 / 12.0)
+
+
+def test_stream_annotation_normalization_coder_mappings() -> None:
+    # Copilot review finding (discussion_r4279405304):
+    # Large coder mapping with few categories must stream normalization into dict.fromkeys.
+    c1 = {f"u_{i}": 1 if i % 2 == 0 else 2 for i in range(2000)}
+    c2 = {f"u_{i}": 1 if i % 2 == 0 else 2 for i in range(2000)}
+    data = [c1, c2]
+
+    res_alpha = alpha(data, level_of_measurement="nominal")
+    assert np.isclose(res_alpha, 1.0)
